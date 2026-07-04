@@ -52,6 +52,12 @@ def main():
         "--bore", type=float, default=8, help="Center bore diameter (mm)"
     )
     gear_parser.add_argument(
+        "--style",
+        choices=["lego", "involute"],
+        default="lego",
+        help="Tooth style: chunky LEGO-look or smooth involute",
+    )
+    gear_parser.add_argument(
         "--output-dir",
         type=str,
         default="./output",
@@ -79,7 +85,7 @@ def main():
 
     elif args.type == "gear":
         generator = SimpleGear(
-            teeth=args.teeth, module=args.module, bore=args.bore
+            teeth=args.teeth, module=args.module, bore=args.bore, style=args.style
         )
         files = generator.generate(args.output_dir)
         print(f"Generated gear: {', '.join(files)}")

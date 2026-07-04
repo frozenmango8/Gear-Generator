@@ -1,0 +1,416 @@
+<title>Gear Studio — parametric gear designer</title>
+<style>
+  :root {
+    --bg: #eef1f4;
+    --panel: #ffffff;
+    --ink: #16202c;
+    --muted: #5b6b7b;
+    --line: #d8dee6;
+    --line-strong: #c3ccd6;
+    --accent: #e07b39;      /* machined amber — the gear */
+    --accent-ink: #7a3d13;
+    --steel: #2b7a9e;       /* meshing partner */
+    --grid: #dfe4ea;
+    --track: #dce2e9;
+    --shadow: 0 1px 2px rgba(20,32,44,.06), 0 8px 24px rgba(20,32,44,.07);
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1319;
+      --panel: #171e27;
+      --ink: #e7edf4;
+      --muted: #8a9bab;
+      --line: #263140;
+      --line-strong: #33414f;
+      --accent: #f08a44;
+      --accent-ink: #ffd9bd;
+      --steel: #4fa6cc;
+      --grid: #1c2530;
+      --track: #222c38;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #eef1f4; --panel: #ffffff; --ink: #16202c; --muted: #5b6b7b;
+    --line: #d8dee6; --line-strong: #c3ccd6; --accent: #e07b39; --accent-ink: #7a3d13;
+    --steel: #2b7a9e; --grid: #dfe4ea; --track: #dce2e9;
+    --shadow: 0 1px 2px rgba(20,32,44,.06), 0 8px 24px rgba(20,32,44,.07);
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e1319; --panel: #171e27; --ink: #e7edf4; --muted: #8a9bab;
+    --line: #263140; --line-strong: #33414f; --accent: #f08a44; --accent-ink: #ffd9bd;
+    --steel: #4fa6cc; --grid: #1c2530; --track: #222c38;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--ui); line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 32px 20px 56px; }
+
+  header { margin-bottom: 22px; }
+  .eyebrow {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .16em;
+    text-transform: uppercase; color: var(--accent); font-weight: 600;
+  }
+  h1 {
+    margin: 6px 0 4px; font-size: clamp(26px, 4vw, 38px);
+    letter-spacing: -.02em; text-wrap: balance; font-weight: 680;
+  }
+  .sub { color: var(--muted); max-width: 56ch; margin: 0; }
+
+  .grid2 {
+    display: grid; grid-template-columns: 1.15fr .85fr; gap: 20px;
+    align-items: start;
+  }
+  @media (max-width: 780px) { .grid2 { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 14px; box-shadow: var(--shadow);
+  }
+
+  /* stage */
+  .stage { padding: 14px; }
+  .stage-inner {
+    border-radius: 10px; overflow: hidden; position: relative;
+    background:
+      linear-gradient(var(--grid) 1px, transparent 1px) 0 0 / 22px 22px,
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0 / 22px 22px,
+      var(--panel);
+    aspect-ratio: 1 / 1;
+  }
+  svg { display: block; width: 100%; height: 100%; }
+  .readout-row {
+    display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 12px 6px 2px;
+    font-family: var(--mono); font-size: 12.5px; color: var(--muted);
+  }
+  .readout-row b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  /* controls */
+  .controls { padding: 18px 18px 20px; }
+  .controls h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: .12em;
+    color: var(--muted); margin: 0 0 14px; font-weight: 600;
+  }
+  .field { margin-bottom: 18px; }
+  .field-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 7px;
+  }
+  .field-head label { font-weight: 560; font-size: 14.5px; }
+  .val {
+    font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums;
+    color: var(--accent-ink); background: color-mix(in srgb, var(--accent) 16%, transparent);
+    padding: 2px 8px; border-radius: 6px; font-weight: 600;
+  }
+  input[type="range"] {
+    -webkit-appearance: none; appearance: none; width: 100%; height: 6px;
+    border-radius: 999px; background: var(--track); outline: none; cursor: pointer;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%;
+    background: var(--accent); border: 3px solid var(--panel);
+    box-shadow: 0 1px 3px rgba(0,0,0,.3); cursor: grab;
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 20px; height: 20px; border-radius: 50%; background: var(--accent);
+    border: 3px solid var(--panel); box-shadow: 0 1px 3px rgba(0,0,0,.3); cursor: grab;
+  }
+  input[type="range"]:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 40%, transparent); }
+  .hint { font-size: 12.5px; color: var(--muted); margin: 6px 0 0; }
+
+  .seg { display: flex; gap: 6px; background: var(--track); padding: 4px; border-radius: 10px; }
+  .seg button {
+    flex: 1; border: 0; background: transparent; color: var(--muted);
+    font-family: var(--ui); font-size: 14px; font-weight: 560; padding: 8px 6px;
+    border-radius: 7px; cursor: pointer; transition: background .12s, color .12s;
+  }
+  .seg button[aria-pressed="true"] {
+    background: var(--panel); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.12);
+  }
+  .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .toggle-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 0 2px; border-top: 1px solid var(--line); margin-top: 4px;
+  }
+  .switch { position: relative; width: 44px; height: 26px; flex: none; }
+  .switch input { opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+  .slider-ui {
+    position: absolute; inset: 0; background: var(--track); border-radius: 999px;
+    transition: background .15s; pointer-events: none;
+  }
+  .slider-ui::before {
+    content: ""; position: absolute; width: 20px; height: 20px; left: 3px; top: 3px;
+    background: var(--panel); border-radius: 50%; transition: transform .15s;
+    box-shadow: 0 1px 2px rgba(0,0,0,.3);
+  }
+  .switch input:checked + .slider-ui { background: var(--steel); }
+  .switch input:checked + .slider-ui::before { transform: translateX(18px); }
+  .switch input:focus-visible + .slider-ui { outline: 2px solid var(--steel); outline-offset: 2px; }
+
+  /* command */
+  .cmd-card { margin-top: 20px; padding: 16px 18px; }
+  .cmd-card h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: .12em;
+    color: var(--muted); margin: 0 0 10px; font-weight: 600;
+  }
+  .cmd {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--bg); border: 1px solid var(--line); border-radius: 9px;
+    padding: 11px 12px; overflow-x: auto;
+  }
+  .cmd code {
+    font-family: var(--mono); font-size: 13px; white-space: nowrap; color: var(--ink);
+  }
+  .cmd code .flag { color: var(--accent); }
+  .copy {
+    margin-left: auto; flex: none; border: 1px solid var(--line-strong);
+    background: var(--panel); color: var(--ink); font-family: var(--ui);
+    font-size: 12.5px; font-weight: 560; padding: 6px 12px; border-radius: 7px; cursor: pointer;
+  }
+  .copy:hover { border-color: var(--accent); color: var(--accent-ink); }
+  .copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .foot { color: var(--muted); font-size: 13px; margin-top: 18px; text-align: center; }
+  .foot code { font-family: var(--mono); font-size: 12px; }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Gear Studio</div>
+    <h1>Design a gear, watch it mesh</h1>
+    <p class="sub">Drag the controls to shape a printable spur gear. The command at the bottom is exactly what generates the real <code>.stl</code> file.</p>
+  </header>
+
+  <div class="grid2">
+    <!-- STAGE -->
+    <section class="card stage" aria-label="Gear preview">
+      <div class="stage-inner">
+        <svg id="stage" viewBox="-100 -100 200 200" role="img" aria-label="Live gear preview">
+          <g id="gearB-group"><path id="gearB" fill="var(--steel)"></path><circle id="boreB" fill="var(--panel)"></circle></g>
+          <g id="gearA-group"><path id="gearA" fill="var(--accent)"></path><circle id="boreA" fill="var(--panel)"></circle></g>
+        </svg>
+      </div>
+      <div class="readout-row">
+        <span>outer &oslash; <b id="ro-out">—</b> mm</span>
+        <span>pitch &oslash; <b id="ro-pitch">—</b> mm</span>
+        <span>teeth <b id="ro-teeth">—</b></span>
+        <span>module <b id="ro-mod">—</b></span>
+      </div>
+    </section>
+
+    <!-- CONTROLS -->
+    <section class="card controls" aria-label="Controls">
+      <h2>Gear settings</h2>
+
+      <div class="field">
+        <div class="field-head"><label for="teeth">Teeth</label><span class="val" id="v-teeth">20</span></div>
+        <input type="range" id="teeth" min="6" max="48" step="1" value="20">
+        <p class="hint">More teeth &rarr; bigger wheel, finer teeth.</p>
+      </div>
+
+      <div class="field">
+        <div class="field-head"><label for="module">Tooth size (module)</label><span class="val" id="v-module">2.0</span></div>
+        <input type="range" id="module" min="0.8" max="4" step="0.1" value="2">
+        <p class="hint">Two gears must share this number to mesh.</p>
+      </div>
+
+      <div class="field">
+        <div class="field-head"><label for="bore">Center hole</label><span class="val" id="v-bore">8.0</span></div>
+        <input type="range" id="bore" min="2" max="16" step="0.5" value="8">
+        <p class="hint">Diameter of the axle hole, in mm.</p>
+      </div>
+
+      <div class="field">
+        <div class="field-head"><label>Tooth style</label></div>
+        <div class="seg" role="group" aria-label="Tooth style">
+          <button id="st-lego" aria-pressed="true">LEGO-style</button>
+          <button id="st-inv" aria-pressed="false">Involute</button>
+        </div>
+      </div>
+
+      <div class="toggle-row">
+        <div><label for="mesh" style="font-weight:560">Show a meshing gear</label></div>
+        <span class="switch"><input type="checkbox" id="mesh"><span class="slider-ui"></span></span>
+      </div>
+      <div class="toggle-row" id="spin-row" style="display:none">
+        <div><label for="spin" style="font-weight:560">Spin them</label></div>
+        <span class="switch"><input type="checkbox" id="spin"><span class="slider-ui"></span></span>
+      </div>
+    </section>
+  </div>
+
+  <!-- COMMAND -->
+  <section class="card cmd-card" aria-label="Generator command">
+    <h2>Make the real STL file</h2>
+    <div class="cmd">
+      <code id="cmd">python stl_generator.py gear …</code>
+      <button class="copy" id="copy">Copy</button>
+    </div>
+  </section>
+
+  <p class="foot">Preview is a top-down view. Run the command in the repo to export a 3D <code>.stl</code> for printing.</p>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---- gear geometry (mirrors generators/gear.py) ----
+  function legoOutline(m, N) {
+    var rP = m * N / 2, rO = rP + 0.8 * m, rR = Math.max(rP - 0.9 * m, 0.1);
+    var ts = 2 * Math.PI / N, hb = ts * 0.30, ht = ts * 0.17, pts = [];
+    for (var k = 0; k < N; k++) {
+      var c = k * ts;
+      pts.push([rR * Math.cos(c - hb), rR * Math.sin(c - hb)]);
+      pts.push([rO * Math.cos(c - ht), rO * Math.sin(c - ht)]);
+      pts.push([rO * Math.cos(c + ht), rO * Math.sin(c + ht)]);
+      pts.push([rR * Math.cos(c + hb), rR * Math.sin(c + hb)]);
+      var a0 = c + hb, a1 = c + ts - hb;
+      for (var i = 1; i < 3; i++) { var a = a0 + (a1 - a0) * i / 3; pts.push([rR * Math.cos(a), rR * Math.sin(a)]); }
+    }
+    return pts;
+  }
+  function involuteOutline(m, N) {
+    var pa = 20 * Math.PI / 180, steps = 6;
+    var rP = m * N / 2, rB = rP * Math.cos(pa), rO = rP + m, rR = Math.max(rP - 1.25 * m, 0.1);
+    var invPa = Math.tan(pa) - pa, half = Math.PI / (2 * N);
+    function flank(r) { var rr = Math.max(r, rB); var al = Math.acos(rB / rr); return half + invPa - (Math.tan(al) - al); }
+    var rStart = Math.min(rR, rB), radii = [];
+    for (var i = 0; i <= steps; i++) radii.push(rStart + (rO - rStart) * i / steps);
+    var ts = 2 * Math.PI / N, pts = [];
+    for (var k = 0; k < N; k++) {
+      var c = k * ts, r, th;
+      for (var a = 0; a < radii.length; a++) { r = radii[a]; th = c - flank(r); pts.push([r * Math.cos(th), r * Math.sin(th)]); }
+      for (var b = radii.length - 1; b >= 0; b--) { r = radii[b]; th = c + flank(r); pts.push([r * Math.cos(th), r * Math.sin(th)]); }
+      var tl = c + flank(rStart), tn = (c + ts) - flank(rStart);
+      for (var j = 1; j < 4; j++) { th = tl + (tn - tl) * j / 4; pts.push([rR * Math.cos(th), rR * Math.sin(th)]); }
+    }
+    return pts;
+  }
+  function outline(m, N, style) { return style === "involute" ? involuteOutline(m, N) : legoOutline(m, N); }
+  function toPath(pts) {
+    var d = "M" + pts[0][0].toFixed(3) + " " + pts[0][1].toFixed(3);
+    for (var i = 1; i < pts.length; i++) d += "L" + pts[i][0].toFixed(3) + " " + pts[i][1].toFixed(3);
+    return d + "Z";
+  }
+  function outerR(m, N, style) { return style === "involute" ? m * N / 2 + m : m * N / 2 + 0.8 * m; }
+
+  // ---- state ----
+  var S = { teeth: 20, module: 2.0, bore: 8.0, style: "lego", mesh: false, spin: false, partner: 12 };
+
+  var $ = function (id) { return document.getElementById(id); };
+  var stage = $("stage"), gearA = $("gearA"), boreA = $("boreA"),
+      gearB = $("gearB"), boreB = $("boreB"),
+      groupA = $("gearA-group"), groupB = $("gearB-group");
+
+  function render() {
+    var m = S.module, N = S.teeth, style = S.style;
+    var ptsA = outline(m, N, style), rA = outerR(m, N, style);
+
+    gearA.setAttribute("d", toPath(ptsA));
+    boreA.setAttribute("r", (S.bore / 2).toFixed(3));
+
+    var maxR = rA;
+    if (S.mesh) {
+      var Np = S.partner, ptsB = outline(m, Np, style), rB = outerR(m, Np, style);
+      var cd = (m * N / 2) + (m * Np / 2);       // center distance
+      gearB.setAttribute("d", toPath(ptsB));
+      boreB.setAttribute("r", Math.max(1.2, (S.bore / 2) * 0.7).toFixed(3));
+      boreB.setAttribute("cx", cd); boreB.setAttribute("cy", 0);
+      groupB.setAttribute("transform", "translate(" + cd + ",0)");
+      groupB.dataset.cd = cd; groupB.dataset.np = Np;
+      groupB.style.display = "";
+      maxR = Math.max(rA, cd + rB);
+      // viewBox spans both gears with padding
+      var left = -rA - 6, w = (maxR + 6) - left, h = 2 * Math.max(rA, rB) + 12;
+      var vb = Math.max(w, h);
+      stage.setAttribute("viewBox", (left - (vb - w) / 2) + " " + (-vb / 2) + " " + vb + " " + vb);
+    } else {
+      groupB.style.display = "none";
+      var pad = maxR + 8;
+      stage.setAttribute("viewBox", (-pad) + " " + (-pad) + " " + (2 * pad) + " " + (2 * pad));
+    }
+
+    // readouts
+    $("ro-out").textContent = (2 * rA).toFixed(1);
+    $("ro-pitch").textContent = (m * N).toFixed(1);
+    $("ro-teeth").textContent = N;
+    $("ro-mod").textContent = m.toFixed(1);
+
+    // command
+    var cmd = 'python stl_generator.py gear '
+      + '<span class="flag">--teeth</span> ' + N + ' '
+      + '<span class="flag">--module</span> ' + m.toFixed(1) + ' '
+      + '<span class="flag">--bore</span> ' + S.bore.toFixed(1) + ' '
+      + '<span class="flag">--style</span> ' + style;
+    $("cmd").innerHTML = cmd;
+    applySpin();
+  }
+
+  // ---- meshing animation ----
+  var raf = null, angle = 0, last = 0;
+  function applySpin() {
+    if (S.mesh && S.spin) { if (!raf) { last = 0; raf = requestAnimationFrame(tick); } }
+    else { if (raf) { cancelAnimationFrame(raf); raf = null; } groupA.setAttribute("transform", ""); if (groupB.dataset.cd) resetB(); }
+  }
+  function resetB() { groupB.setAttribute("transform", "translate(" + groupB.dataset.cd + ",0)"); }
+  function tick(t) {
+    if (!last) last = t;
+    var dt = Math.min(50, t - last); last = t;
+    angle += dt * 0.03;                          // deg/ms of gear A
+    var N = S.teeth, Np = +groupB.dataset.np, cd = +groupB.dataset.cd;
+    var aB = -angle * N / Np + 180 / Np;         // counter-rotate + half-tooth phase
+    groupA.setAttribute("transform", "rotate(" + angle + ")");
+    groupB.setAttribute("transform", "translate(" + cd + ",0) rotate(" + aB + ")");
+    raf = requestAnimationFrame(tick);
+  }
+
+  // ---- wiring ----
+  function bindRange(id, key, label, dp) {
+    var el = $(id);
+    el.addEventListener("input", function () {
+      S[key] = parseFloat(el.value);
+      $(label).textContent = dp === 0 ? S[key] : S[key].toFixed(dp);
+      render();
+    });
+  }
+  bindRange("teeth", "teeth", "v-teeth", 0);
+  bindRange("module", "module", "v-module", 1);
+  bindRange("bore", "bore", "v-bore", 1);
+
+  $("st-lego").addEventListener("click", function () { setStyle("lego"); });
+  $("st-inv").addEventListener("click", function () { setStyle("involute"); });
+  function setStyle(s) {
+    S.style = s;
+    $("st-lego").setAttribute("aria-pressed", s === "lego");
+    $("st-inv").setAttribute("aria-pressed", s === "involute");
+    render();
+  }
+
+  $("mesh").addEventListener("change", function () {
+    S.mesh = this.checked;
+    $("spin-row").style.display = this.checked ? "flex" : "none";
+    if (!this.checked) { S.spin = false; $("spin").checked = false; }
+    render();
+  });
+  $("spin").addEventListener("change", function () { S.spin = this.checked; render(); });
+
+  $("copy").addEventListener("click", function () {
+    var txt = $("cmd").textContent;
+    navigator.clipboard && navigator.clipboard.writeText(txt);
+    var b = $("copy"), old = b.textContent; b.textContent = "Copied!";
+    setTimeout(function () { b.textContent = old; }, 1200);
+  });
+
+  render();
+})();
+</script>

@@ -11,6 +11,7 @@ CLI:  python -m generator.fitgauge --bore-type cross_axle --out ./output/fitgaug
 from __future__ import annotations
 
 import argparse
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +20,12 @@ from shapely.geometry import Point
 
 from . import common
 from .common import BORE_CLEARANCE, PLATE_MM, export_stl
+
+# Embossed label: raised dots on the top face, count == clearance * 100
+# (e.g. 5 dots for 0.05 mm). No font dependency, distinguishable by eye.
+LABEL_DOT_RADIUS = 0.5        # mm
+LABEL_DOT_PROTRUDE = 0.6      # mm raised above the top face
+LABEL_DOT_EMBED = 0.3         # mm sunk into the disc for a clean, watertight union
 
 
 @dataclass
@@ -29,6 +36,7 @@ class FitGaugeParams:
     diameter: float = 12.0                 # outer disc diameter (mm)
     thickness_units: float = 1.0           # multiples of PLATE_MM
     clearance_override: float | None = None  # None -> use common.BORE_CLEARANCE
+    emboss_label: bool = True              # raised dots encoding the clearance
 
     @property
     def thickness_mm(self) -> float:
@@ -37,6 +45,48 @@ class FitGaugeParams:
     @property
     def clearance(self) -> float:
         return BORE_CLEARANCE if self.clearance_override is None else self.clearance_override
+
+
+def label_mark_count(clearance: float) -> int:
+    """Number of raised dots that encode a clearance value (clearance * 100)."""
+    return max(0, round(clearance * 100))
+
+
+def _label_radius(params: FitGaugeParams) -> float:
+    """Radius at which to place the label dots: clear of the bore and the rim."""
+    r_disc = params.diameter / 2.0
+    r_bore = common.bore_max_radius(params.bore_type, params.clearance)
+    r = (r_bore + r_disc) / 2.0
+    r = max(r, r_bore + LABEL_DOT_RADIUS + 0.5)   # keep off the bore/fit area
+    r = min(r, r_disc - LABEL_DOT_RADIUS - 0.4)   # keep inside the rim
+    return r
+
+
+def _emboss_label(disc: trimesh.Trimesh, params: FitGaugeParams) -> trimesh.Trimesh:
+    """Union raised dots onto the disc's top face encoding clearance * 100."""
+    n = label_mark_count(params.clearance)
+    if n == 0:
+        return disc
+
+    r_label = _label_radius(params)
+    height = LABEL_DOT_EMBED + LABEL_DOT_PROTRUDE
+    # cylinder base sits LABEL_DOT_EMBED below the top face, tip protrudes above
+    z_center = params.thickness_mm - LABEL_DOT_EMBED + height / 2.0
+
+    dots = []
+    for i in range(n):
+        ang = 2 * math.pi * i / n + math.pi / 2  # start at top, evenly spaced
+        dot = trimesh.creation.cylinder(
+            radius=LABEL_DOT_RADIUS, height=height, sections=24
+        )
+        dot.apply_translation(
+            (r_label * math.cos(ang), r_label * math.sin(ang), z_center)
+        )
+        dots.append(dot)
+
+    merged = trimesh.boolean.union([disc, *dots])
+    merged.merge_vertices()
+    return merged
 
 
 def generate_fit_gauge(params: FitGaugeParams) -> trimesh.Trimesh:
@@ -67,6 +117,10 @@ def generate_fit_gauge(params: FitGaugeParams) -> trimesh.Trimesh:
 
     mesh = trimesh.creation.extrude_polygon(section, height=params.thickness_mm)
     mesh.merge_vertices()
+
+    if params.emboss_label:
+        mesh = _emboss_label(mesh, params)
+
     if not mesh.is_watertight:
         raise ValueError("Internal error: fit gauge mesh is not watertight.")
     return mesh
@@ -117,7 +171,15 @@ def main(argv: list[str] | None = None) -> int:
         description="Generate LEGO cross-axle / pin-hole fit gauges."
     )
     parser.add_argument(
-        "--bore-type", choices=["cross_axle", "pin_hole"], default="cross_axle"
+        "--bore-type",
+        choices=["cross_axle", "pin_hole"],
+        default=None,
+        help="Bore type. Omit (or pass --both) to generate both in one run.",
+    )
+    parser.add_argument(
+        "--both",
+        action="store_true",
+        help="Generate both cross_axle and pin_hole sweeps in one invocation",
     )
     parser.add_argument("--out", default="./output/fitgauge", help="Output directory")
     parser.add_argument("--diameter", type=float, default=12.0, help="Disc diameter (mm)")
@@ -136,30 +198,41 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    # No bore type given, or --both -> do both. Otherwise just the one named.
+    if args.both or args.bore_type is None:
+        bore_types = ["cross_axle", "pin_hole"]
+    else:
+        bore_types = [args.bore_type]
+
     if args.single:
-        params = FitGaugeParams(
-            bore_type=args.bore_type,
-            diameter=args.diameter,
-            thickness_units=args.thickness,
-        )
-        mesh = generate_fit_gauge(params)
         Path(args.out).mkdir(parents=True, exist_ok=True)
-        path = Path(args.out) / f"fitgauge_{args.bore_type}_clearance_{_fmt(params.clearance)}.stl"
-        export_stl(mesh, str(path))
-        print(f"Wrote {path}")
+        for bore in bore_types:
+            params = FitGaugeParams(
+                bore_type=bore,
+                diameter=args.diameter,
+                thickness_units=args.thickness,
+            )
+            mesh = generate_fit_gauge(params)
+            path = Path(args.out) / f"fitgauge_{bore}_clearance_{_fmt(params.clearance)}.stl"
+            export_stl(mesh, str(path))
+            print(f"Wrote {path}  ({label_mark_count(params.clearance)} dots)")
         return 0
 
     offsets = [float(x) for x in args.offsets.split(",")]
-    results = clearance_sweep(
-        bore_type=args.bore_type,
-        output_dir=args.out,
-        offsets=offsets,
-        diameter=args.diameter,
-        thickness_units=args.thickness,
-    )
-    print(f"Wrote {len(results)} fit gauges to {args.out}:")
-    for clearance, path in results:
-        print(f"  clearance {clearance:+.2f} mm  ->  {Path(path).name}")
+    for bore in bore_types:
+        results = clearance_sweep(
+            bore_type=bore,
+            output_dir=args.out,
+            offsets=offsets,
+            diameter=args.diameter,
+            thickness_units=args.thickness,
+        )
+        print(f"Wrote {len(results)} {bore} fit gauges to {args.out}:")
+        for clearance, path in results:
+            print(
+                f"  clearance {clearance:+.2f} mm  "
+                f"({label_mark_count(clearance):2d} dots)  ->  {Path(path).name}"
+            )
     return 0
 
 

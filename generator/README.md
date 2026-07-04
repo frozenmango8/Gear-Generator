@@ -60,9 +60,15 @@ vary, so dial the clearance in with the **fit gauge** (small bored discs, no
 teeth) instead of reprinting whole gears:
 
 ```bash
-# print this whole sweep on one plate, try a real axle in each
-python -m generator.fitgauge --bore-type cross_axle --out ./output/fitgauge
+# both bore types, whole clearance sweep, one plate — try a real part in each
+python -m generator.fitgauge --out ./output/fitgauge
 ```
+
+Omitting `--bore-type` (or passing `--both`) generates both `cross_axle` and
+`pin_hole` sweeps in one run; pass `--bore-type cross_axle` for just one. Each
+disc is **embossed with raised dots = clearance × 100** (5 dots = 0.05 mm), so
+they stay distinguishable by eye after printing, not just by filename. The dots
+sit clear of the bore so they never affect the fit.
 
 This writes `fitgauge_cross_axle_clearance_0.00.stl` … `_0.20.stl` (a sweep
 around `BORE_CLEARANCE`). Whichever grips right tells you the value to set:

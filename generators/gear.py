@@ -73,6 +73,6 @@ class SimpleGear(PartGenerator):
 
         gear = self._create_gear()
         gear_file = output_path / f"gear_{self.teeth}t_{self.module}m.stl"
-        gear.save(str(gear_file))
+        cq.exporters.export(gear, str(gear_file))
 
         return [str(gear_file)]

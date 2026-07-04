@@ -49,7 +49,7 @@ class SnapFitBox(PartGenerator):
         snap_tab = (
             cq.Workplane("XY")
             .box(self.snap_width, self.snap_width, self.snap_height, centered=True)
-            .translate((0, 0, self.height / 2 - self.snap_height / 2))
+            .translate((0, 0, self.height / 2 + self.snap_height / 2))
         )
 
         for x in [-self.width / 2 + 5, self.width / 2 - 5]:
@@ -90,10 +90,10 @@ class SnapFitBox(PartGenerator):
 
         base = self._create_base()
         base_file = output_path / "snapfit_base.stl"
-        base.save(str(base_file))
+        cq.exporters.export(base, str(base_file))
 
         lid = self._create_lid()
         lid_file = output_path / "snapfit_lid.stl"
-        lid.save(str(lid_file))
+        cq.exporters.export(lid, str(lid_file))
 
         return [str(base_file), str(lid_file)]

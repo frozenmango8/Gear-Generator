@@ -56,12 +56,20 @@ Verified constants (see `common.py` for sources): 1 stud = 8 mm, 1 plate =
 **The cross-axle rib width is tune-to-fit.** The exact LDraw primitive was not
 reachable at build time, so `AXLE_ARM_WIDTH` uses the 3D-printing community
 value (2.0 mm in a 4.8 mm span) plus a `BORE_CLEARANCE` of 0.10 mm. Printers
-vary, so before committing to a batch:
+vary, so dial the clearance in with the **fit gauge** (small bored discs, no
+teeth) instead of reprinting whole gears:
 
-1. Print one 24t cross-axle gear.
-2. Try a real LEGO axle in it.
-3. Too tight → raise `BORE_CLEARANCE`; too loose → lower it. Both live at the
-   top of `common.py`, the single source of truth for every LEGO dimension.
+```bash
+# print this whole sweep on one plate, try a real axle in each
+python -m generator.fitgauge --bore-type cross_axle --out ./output/fitgauge
+```
+
+This writes `fitgauge_cross_axle_clearance_0.00.stl` … `_0.20.stl` (a sweep
+around `BORE_CLEARANCE`). Whichever grips right tells you the value to set:
+edit `BORE_CLEARANCE` at the top of `common.py` — the single source of truth
+for every LEGO dimension — and every gear inherits it. The gauge bore is
+produced by the *same* `bore_profile()` the gears use, so the fit you feel on a
+gauge is the fit you get on a gear.
 
 ## Layout
 

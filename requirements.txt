@@ -1,2 +1,7 @@
-cadquery==2.4.0
-scipy==1.13.1
+# LEGO Technic gear generator (generator/ package)
+trimesh==4.12.2
+shapely==2.1.2
+numpy==2.4.6
+mapbox-earcut==2.0.0
+# Tkinter is used by generator/gui.py but ships with standard desktop Python
+# (on Linux install the system package python3-tk).

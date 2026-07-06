@@ -94,6 +94,8 @@ button {
 }
 button:disabled { opacity: .55; cursor: not-allowed; }
 .primary { background: var(--accent); color: #fff; }
+.btn-row { display: flex; gap: 8px; }
+.btn-row .primary { flex: 1; padding: 11px 8px; font-size: 13px; }
 .secondary { background: transparent; color: var(--steel); border-color: var(--line); }
 .msg { margin: 0; font-size: 13.5px; }
 .msg.error { color: var(--err); }

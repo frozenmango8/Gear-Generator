@@ -1,7 +1,8 @@
 /**
  * Browser GUI for the general-purpose involute gear generator (React form).
- * Free parameters: module, teeth, pressure angle, bore, hub, thickness.
- * Downloads a binary STL via a browser Blob — fully client-side, no server.
+ * Single-gear mode: free module/teeth/pressure-angle/bore/hub/thickness with
+ * STL download. Meshing-pair mode: two same-module gears shown interlocked at
+ * true relative size, to confirm they mesh regardless of tooth count.
  */
 
 import { useEffect, useState } from "react";
@@ -10,10 +11,15 @@ import { rootRadius, outerRadius, DEFAULT_PRESSURE_ANGLE, MIN_TEETH } from "./co
 import { generateInvoluteGear, GearParams, GearValidationError } from "./gears.js";
 import { downloadStl } from "./stl.js";
 import GearPreview from "./GearPreview.js";
+import MeshPreview from "./MeshPreview.js";
+
+type Mode = "single" | "pair";
 
 export default function App() {
+  const [mode, setMode] = useState<Mode>("single");
   const [module, setModule] = useState(2);
   const [teeth, setTeeth] = useState(20);
+  const [teethB, setTeethB] = useState(12);
   const [pressureAngle, setPressureAngle] = useState(DEFAULT_PRESSURE_ANGLE);
   const [bore, setBore] = useState(6);
   const [hub, setHub] = useState(0);
@@ -21,19 +27,20 @@ export default function App() {
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null);
+  const [geometryB, setGeometryB] = useState<THREE.BufferGeometry | null>(null);
 
   // dynamic limits so sliders can't cross into invalid geometry
   const maxBore = Math.max(0, +(2 * rootRadius(teeth, module) - 0.2).toFixed(1));
   const maxHub = +(2 * outerRadius(teeth, module) - 0.4).toFixed(1);
 
-  // clamp dependent values when module/teeth change
   useEffect(() => {
     if (bore > maxBore) setBore(maxBore);
     if (hub !== 0 && hub > maxHub) setHub(maxHub);
   }, [maxBore, maxHub]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const params: GearParams = { module, teeth, pressureAngle, boreDiameter: bore, hubDiameter: hub, thickness };
+  const params: GearParams = { module, teeth, pressureAngle, boreDiameter: bore, hubDiameter: mode === "single" ? hub : 0, thickness };
 
+  // gear A
   useEffect(() => {
     try {
       setGeometry(generateInvoluteGear(params));
@@ -42,22 +49,31 @@ export default function App() {
       setGeometry(null);
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [module, teeth, pressureAngle, bore, hub, thickness]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [module, teeth, pressureAngle, bore, hub, thickness, mode]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const onDownload = () => {
+  // gear B (pair mode) — shares module / pressure angle / thickness
+  useEffect(() => {
+    if (mode !== "pair") return;
     try {
-      const geo = generateInvoluteGear(params);
-      const name = `gear_m${module}_${teeth}t${hub ? "_hub" : ""}.stl`;
-      downloadStl(geo, name);
-      setStatus(`Downloaded ${teeth}t gear, module ${module} (${(module * teeth).toFixed(1)} mm pitch dia).`);
+      const boreB = Math.max(0, Math.min(bore, 2 * rootRadius(teethB, module) - 0.5));
+      setGeometryB(generateInvoluteGear({ module, teeth: teethB, pressureAngle, boreDiameter: boreB, thickness }));
+    } catch {
+      setGeometryB(null);
+    }
+  }, [mode, module, teethB, pressureAngle, bore, thickness]);
+
+  const download = (t: number, geo: THREE.BufferGeometry | null) => {
+    if (!geo) return;
+    try {
+      downloadStl(geo, `gear_m${module}_${t}t.stl`);
+      setStatus(`Downloaded ${t}t gear, module ${module} (${(module * t).toFixed(1)} mm pitch dia).`);
       setError("");
     } catch (e) {
       setError(e instanceof GearValidationError ? e.message : String(e));
     }
   };
 
-  const pitchDia = (module * teeth).toFixed(1);
-  const outerDia = (2 * outerRadius(teeth, module)).toFixed(1);
+  const centreDist = ((module * (teeth + teethB)) / 2).toFixed(1);
 
   return (
     <div className="wrap">
@@ -72,27 +88,58 @@ export default function App() {
 
       <div className="grid">
         <section className="panel">
-          <GearPreview geometry={geometry} />
+          {mode === "pair" ? (
+            <MeshPreview gearA={geometry} gearB={geometryB} teethA={teeth} teethB={teethB} module={module} />
+          ) : (
+            <GearPreview geometry={geometry} />
+          )}
           <div className="readout">
-            <span>pitch &oslash; <b>{pitchDia}</b> mm</span>
-            <span>outer &oslash; <b>{outerDia}</b> mm</span>
+            {mode === "pair" ? (
+              <>
+                <span>ratio <b>{teeth}:{teethB}</b></span>
+                <span>centres <b>{centreDist}</b> mm apart</span>
+                <span>module <b>{module.toFixed(1)}</b> (shared → they mesh)</span>
+              </>
+            ) : (
+              <>
+                <span>pitch &oslash; <b>{(module * teeth).toFixed(1)}</b> mm</span>
+                <span>outer &oslash; <b>{(2 * outerRadius(teeth, module)).toFixed(1)}</b> mm</span>
+              </>
+            )}
           </div>
         </section>
 
         <section className="panel controls">
+          <div className="seg" role="group" aria-label="Mode">
+            {(["single", "pair"] as Mode[]).map((m) => (
+              <button key={m} type="button" aria-pressed={mode === m} onClick={() => setMode(m)}>
+                {m === "single" ? "Single gear" : "Meshing pair"}
+              </button>
+            ))}
+          </div>
+
           <div className="field">
             <div className="field-head"><span>Module</span><span className="val">{module.toFixed(1)} mm</span></div>
             <input type="range" min={0.5} max={5} step={0.1} value={module}
               onChange={(e) => setModule(Number(e.target.value))} />
-            <small>tooth size (mm per tooth on the pitch circle)</small>
+            <small>tooth size — {mode === "pair" ? "shared by both gears" : "mm per tooth on the pitch circle"}</small>
           </div>
 
           <div className="field">
-            <div className="field-head"><span>Teeth</span><span className="val">{teeth}</span></div>
+            <div className="field-head"><span>{mode === "pair" ? "Gear A teeth" : "Teeth"}</span><span className="val">{teeth}</span></div>
             <input type="range" min={MIN_TEETH} max={60} step={1} value={teeth}
               onChange={(e) => setTeeth(Number(e.target.value))} />
             <small>any integer ≥ {MIN_TEETH}</small>
           </div>
+
+          {mode === "pair" && (
+            <div className="field">
+              <div className="field-head"><span>Gear B teeth</span><span className="val">{teethB}</span></div>
+              <input type="range" min={MIN_TEETH} max={60} step={1} value={teethB}
+                onChange={(e) => setTeethB(Number(e.target.value))} />
+              <small>different count, same module → still meshes</small>
+            </div>
+          )}
 
           <fieldset className="field">
             <span>Pressure angle</span>
@@ -111,12 +158,14 @@ export default function App() {
             <small>round hole (0 = solid centre)</small>
           </div>
 
-          <div className="field">
-            <div className="field-head"><span>Hub diameter</span><span className="val">{hub === 0 ? "none" : `${hub.toFixed(1)} mm`}</span></div>
-            <input type="range" min={0} max={maxHub} step={0.5} value={hub}
-              onChange={(e) => { const v = Number(e.target.value); setHub(v <= bore ? 0 : v); }} />
-            <small>0 = none; a boss around the bore, as tall as the gear</small>
-          </div>
+          {mode === "single" && (
+            <div className="field">
+              <div className="field-head"><span>Hub diameter</span><span className="val">{hub === 0 ? "none" : `${hub.toFixed(1)} mm`}</span></div>
+              <input type="range" min={0} max={maxHub} step={0.5} value={hub}
+                onChange={(e) => { const v = Number(e.target.value); setHub(v <= bore ? 0 : v); }} />
+              <small>0 = none; a boss around the bore, as tall as the gear</small>
+            </div>
+          )}
 
           <div className="field">
             <div className="field-head"><span>Thickness</span><span className="val">{thickness.toFixed(1)} mm</span></div>
@@ -124,9 +173,20 @@ export default function App() {
               onChange={(e) => setThickness(Number(e.target.value))} />
           </div>
 
-          <button className="primary" onClick={onDownload} disabled={!geometry}>
-            Download gear STL
-          </button>
+          {mode === "pair" ? (
+            <div className="btn-row">
+              <button className="primary" onClick={() => download(teeth, geometry)} disabled={!geometry}>
+                Download gear A ({teeth}t)
+              </button>
+              <button className="primary" onClick={() => download(teethB, geometryB)} disabled={!geometryB}>
+                Download gear B ({teethB}t)
+              </button>
+            </div>
+          ) : (
+            <button className="primary" onClick={() => download(teeth, geometry)} disabled={!geometry}>
+              Download gear STL
+            </button>
+          )}
           {error && <p className="msg error">{error}</p>}
           {!error && status && <p className="msg ok">{status}</p>}
         </section>

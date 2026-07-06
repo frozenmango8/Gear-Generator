@@ -1,8 +1,0 @@
-# LEGO Technic gear generator (generator/ package)
-trimesh==4.12.2
-shapely==2.1.2
-numpy==2.4.6
-mapbox-earcut==2.0.0
-manifold3d==3.5.2   # boolean union backend for embossed fit-gauge labels
-# Tkinter is used by generator/gui.py but ships with standard desktop Python
-# (on Linux install the system package python3-tk).

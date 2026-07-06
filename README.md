@@ -1,75 +1,32 @@
-# Parametric STL Generator
+# Involute Spur Gear Generator
 
-Generate precision mechanical parts with exact tolerances. Each part type is designed with spatial reasoning — snap-fits require precise slot/tab alignment, gears need involute tooth geometry for proper meshing.
+A client-side, browser-based parametric **involute spur gear** generator built
+in TypeScript (React + three.js). Set the module, teeth, pressure angle, bore,
+hub, and thickness; see a live 3D preview; download a watertight binary `.stl`.
+No server — it runs entirely in the browser and deploys as a static site.
 
-## Setup
+The project lives in [`web-app/`](web-app/).
 
-```bash
-pip install -r requirements.txt
-```
-
-## Usage
-
-### Snap-Fit Box
-Generate a snap-fit assembly with interlocking lid and base:
+## Quick start
 
 ```bash
-python stl_generator.py snapfit \
-  --width 50 --depth 50 --height 30 \
-  --wall-thickness 2 --tolerance 0.2 \
-  --output-dir ./output
+cd web-app
+npm install
+npm run dev      # dev server with live preview
+npm run build    # static site -> web-app/dist/
+npm test         # watertightness + dimensional test matrix
 ```
 
-Outputs:
-- `snapfit_base.stl` — box base with snap tabs
-- `snapfit_lid.stl` — lid with snap slots
+## Parameters
 
-Parameters:
-- `--width`, `--depth`, `--height` — box dimensions (mm)
-- `--wall-thickness` — wall thickness (mm)
-- `--tolerance` — snap-fit clearance (mm) — adjust if pieces don't fit
+| Param           | Notes                                            |
+|-----------------|--------------------------------------------------|
+| `module`        | mm per tooth on the pitch circle (typ. 0.5–5)    |
+| `teeth`         | integer ≥ 6                                       |
+| `pressureAngle` | degrees, default 20 (14.5° legacy allowed)       |
+| `boreDiameter`  | mm, plain round hole (0 = solid centre)          |
+| `hubDiameter`   | 0 = none, or > bore (a boss around the bore)     |
+| `thickness`     | mm                                               |
 
-### Spur Gear
-Generate a spur gear with involute tooth profile:
-
-```bash
-python stl_generator.py gear \
-  --teeth 20 --module 2.0 --bore 8 \
-  --output-dir ./output
-```
-
-Outputs:
-- `gear_20t_2m.stl` — gear with 20 teeth, 2mm module
-
-Parameters:
-- `--teeth` — number of teeth
-- `--module` — gear module (pitch diameter = teeth × module)
-- `--bore` — center bore diameter (mm)
-
-## Design Philosophy
-
-Each part is built with precision in mind:
-- Snap-fits use parameterized slot/tab geometry with adjustable tolerance
-- Gears use involute profiles for proper gear meshing
-- All dimensions are exact and suitable for 3D printing
-
-## Adding New Part Types
-
-1. Create a new file in `generators/`
-2. Subclass `PartGenerator`
-3. Implement `generate()` method using CadQuery
-4. Add parser to `stl_generator.py`
-
-Example:
-
-```python
-from generators.base import PartGenerator
-
-class MyPart(PartGenerator):
-    def generate(self, output_dir: str) -> list[str]:
-        # Use CadQuery to build part
-        part = cq.Workplane("XY").box(10, 10, 10)
-        output_file = Path(output_dir) / "my_part.stl"
-        part.save(str(output_file))
-        return [str(output_file)]
-```
+See [`web-app/README.md`](web-app/README.md) for geometry details and the full
+verification matrix.

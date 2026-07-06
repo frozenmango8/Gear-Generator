@@ -2,6 +2,7 @@
  *  container (orientation changes, window resize, layout reflow). */
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
+import { toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
 export default function GearPreview({ geometry }: { geometry: THREE.BufferGeometry | null }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -15,8 +16,13 @@ export default function GearPreview({ geometry }: { geometry: THREE.BufferGeomet
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     host.appendChild(renderer.domElement);
 
-    const g = geometry.clone();
-    g.center();
+    const centered = geometry.clone();
+    centered.center();
+    // Hard edges where the flat face meets the walls (crease > ~30 deg), smooth
+    // along the curved bore and tooth flanks — removes the smooth-normal
+    // "pinwheel" shading around the hole.
+    const g = toCreasedNormals(centered, THREE.MathUtils.degToRad(30));
+    centered.dispose();
     const mat = new THREE.MeshStandardMaterial({ color: 0xe07b39, metalness: 0.15, roughness: 0.55 });
     const mesh = new THREE.Mesh(g, mat);
     mesh.rotation.x = 0; // bird's-eye: gear face toward the camera

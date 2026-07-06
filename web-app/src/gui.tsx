@@ -36,7 +36,7 @@ function GearPreview({ geometry }: { geometry: THREE.BufferGeometry | null }) {
     g.center();
     const mat = new THREE.MeshStandardMaterial({ color: 0xe07b39, metalness: 0.1, roughness: 0.6 });
     const mesh = new THREE.Mesh(g, mat);
-    mesh.rotation.x = -Math.PI / 3;
+    mesh.rotation.x = 0; // bird's-eye: gear face straight toward the camera
     scene.add(mesh);
 
     scene.add(new THREE.AmbientLight(0xffffff, 0.7));

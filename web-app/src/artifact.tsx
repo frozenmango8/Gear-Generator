@@ -109,22 +109,28 @@ function App() {
           <GearPreview geometry={geometry} />
         </section>
         <section className="panel controls">
-          <label className="field">
-            <span>Teeth</span>
-            <select value={teeth} onChange={(e) => setTeeth(Number(e.target.value))}>
-              {SUPPORTED_TEETH.map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
-            <small>outer &oslash; {od} mm</small>
-          </label>
+          <div className="field">
+            <div className="field-head"><span>Teeth</span><span className="val">{teeth}</span></div>
+            <input
+              type="range"
+              min={0}
+              max={SUPPORTED_TEETH.length - 1}
+              step={1}
+              value={(SUPPORTED_TEETH as readonly number[]).indexOf(teeth)}
+              onChange={(e) => setTeeth(SUPPORTED_TEETH[Number(e.target.value)])}
+            />
+            <small>outer &oslash; {od} mm &middot; standard LEGO sizes</small>
+          </div>
 
-          <label className="field">
-            <span>Thickness (plate units)</span>
-            <input type="number" min={1} max={10} step={1} value={thickness}
+          <div className="field">
+            <div className="field-head">
+              <span>Thickness</span>
+              <span className="val">{(thickness * 3.2).toFixed(1)} mm</span>
+            </div>
+            <input type="range" min={1} max={10} step={1} value={thickness}
               onChange={(e) => setThickness(Number(e.target.value))} />
-            <small>{(thickness * 3.2).toFixed(1)} mm</small>
-          </label>
+            <small>{thickness} plate unit{thickness > 1 ? "s" : ""}</small>
+          </div>
 
           <fieldset className="field">
             <span>Bore type</span>

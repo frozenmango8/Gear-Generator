@@ -1,34 +1,35 @@
 /**
- * LEGO Technic-compatible gear generation (ported 1:1 from generator/gears.py).
+ * General-purpose involute spur gear generator.
  *
- * generateLegoGear(params) is pure: parameters in, THREE.BufferGeometry out.
- * The bore is subtracted in 2D (Shape hole) exactly as the Python builds a
- * shapely polygon-with-hole before extruding — watertight by construction.
+ * generateInvoluteGear(params) is pure: parameters in, THREE.BufferGeometry
+ * out. The tooth profile and the round bore are both 2D operations (Shape +
+ * hole) extruded to the requested thickness — no 3D boolean, no WASM.
  */
 
 import * as THREE from "three";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import {
-  BoreType,
-  PLATE_MM,
-  SUPPORTED_TEETH,
-  MIN_CUSTOM_TEETH,
-  boreProfile,
-  boreMaxRadius,
+  MIN_TEETH,
+  DEFAULT_PRESSURE_ANGLE,
+  DEDENDUM_FACTOR,
   involuteGearOutline,
+  circleProfile,
+  asHole,
   rootRadius,
   weld,
   isWatertight,
 } from "./common.js";
 
 export interface GearParams {
-  teeth: number;
-  thicknessUnits?: number; // multiples of PLATE_MM (default 1)
-  boreType?: BoreType; // default "cross_axle"
-  hubStyle?: string; // reserved; "flat" for v1
-  allowCustom?: boolean; // permit teeth outside SUPPORTED_TEETH
+  module: number; // mm per tooth on the pitch circle
+  teeth: number; // integer >= 6
+  pressureAngle?: number; // degrees, default 20 (14.5 legacy allowed)
+  boreDiameter?: number; // mm, plain round hole (0 = solid centre)
+  hubDiameter?: number; // 0 = none, or > boreDiameter (boss around the bore)
+  thickness: number; // mm
 }
 
-/** Typed error matching the Python GearValidationError. */
+/** Typed validation error. */
 export class GearValidationError extends Error {
   constructor(message: string) {
     super(message);
@@ -36,109 +37,102 @@ export class GearValidationError extends Error {
   }
 }
 
-function thicknessMm(p: GearParams): number {
-  return (p.thicknessUnits ?? 1.0) * PLATE_MM;
-}
-
-/** Check parameters against the LEGO system. Throws GearValidationError. */
-export function validate(params: GearParams): void {
-  const t = params.teeth;
-  if (!Number.isInteger(t) || t <= 0) {
-    throw new GearValidationError("Teeth must be a positive whole number.");
+/** Check parameters. Throws GearValidationError. */
+export function validate(p: GearParams): void {
+  if (!(p.module > 0)) {
+    throw new GearValidationError("Module must be greater than 0.");
   }
-
-  const boreType = params.boreType ?? "cross_axle";
-  const allowCustom = params.allowCustom ?? false;
-
-  if (!allowCustom && !(SUPPORTED_TEETH as readonly number[]).includes(t)) {
-    const allowed = SUPPORTED_TEETH.join(", ");
+  if (!Number.isInteger(p.teeth) || p.teeth < MIN_TEETH) {
     throw new GearValidationError(
-      `${t} teeth is not a standard LEGO count. Choose one of: ${allowed}.`,
+      `Teeth must be a whole number ≥ ${MIN_TEETH} (fewer undercut and will not mesh cleanly).`,
     );
   }
-  if (allowCustom && t < MIN_CUSTOM_TEETH) {
-    throw new GearValidationError(
-      `Custom gears need at least ${MIN_CUSTOM_TEETH} teeth ` +
-        "(fewer undercut and will not mesh cleanly).",
-    );
+  const pa = p.pressureAngle ?? DEFAULT_PRESSURE_ANGLE;
+  if (!(pa > 0 && pa < 45)) {
+    throw new GearValidationError("Pressure angle must be between 0 and 45 degrees.");
+  }
+  if (!(p.thickness > 0)) {
+    throw new GearValidationError("Thickness must be greater than 0 mm.");
   }
 
-  if ((params.thicknessUnits ?? 1.0) <= 0) {
+  const bore = p.boreDiameter ?? 0;
+  if (bore < 0) throw new GearValidationError("Bore diameter cannot be negative.");
+  // Bore must not cut into the tooth root: boreDiameter < pitchDiameter - 2*dedendum.
+  const maxBore = 2 * rootRadius(p.teeth, p.module);
+  if (bore >= maxBore) {
     throw new GearValidationError(
-      "Thickness must be a positive number of plate units.",
+      `Bore diameter (${bore.toFixed(2)} mm) reaches the tooth root ` +
+        `(max ${maxBore.toFixed(2)} mm). Reduce the bore or add teeth/module.`,
     );
   }
 
-  if (boreType !== "cross_axle" && boreType !== "pin_hole") {
-    throw new GearValidationError(
-      `Unknown bore type ${boreType}; use cross_axle or pin_hole.`,
-    );
-  }
-
-  // Bore must not eat into the tooth root circle.
-  const rRoot = rootRadius(t);
-  const rBore = boreMaxRadius(boreType);
-  if (rBore >= rRoot) {
-    throw new GearValidationError(
-      `Bore (r=${rBore.toFixed(2)} mm) conflicts with tooth root ` +
-        `(r=${rRoot.toFixed(2)} mm). Too few teeth for this bore.`,
-    );
+  const hub = p.hubDiameter ?? 0;
+  if (hub !== 0) {
+    if (hub <= bore) {
+      throw new GearValidationError("Hub diameter must be 0 (none) or larger than the bore.");
+    }
+    if (hub >= 2 * (rootRadius(p.teeth, p.module) + DEDENDUM_FACTOR * p.module)) {
+      throw new GearValidationError("Hub diameter must be smaller than the pitch diameter.");
+    }
   }
 }
 
-/** Clockwise copy of a point loop, for use as an extrude hole. */
-function asHole(points: THREE.Vector2[]): THREE.Path {
-  // boreProfile returns CCW loops; ExtrudeGeometry wants holes wound opposite
-  // to the (CCW) outer contour, i.e. clockwise.
-  const cw = signedArea(points) > 0 ? points.slice().reverse() : points;
-  return new THREE.Path(cw);
-}
-
-function signedArea(points: THREE.Vector2[]): number {
-  let area = 0;
-  for (let i = 0; i < points.length; i++) {
-    const p = points[i];
-    const q = points[(i + 1) % points.length];
-    area += p.x * q.y - q.x * p.y;
-  }
-  return area / 2;
+/** Extrude a toothed/round profile (optionally with a round hole) to a solid. */
+function extrudeProfile(
+  outline: THREE.Vector2[],
+  holeRadius: number,
+  depth: number,
+): THREE.BufferGeometry {
+  const shape = new THREE.Shape(outline);
+  if (holeRadius > 0) shape.holes.push(asHole(circleProfile(holeRadius)));
+  const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false, steps: 1 });
+  return weld(geo);
 }
 
 /**
- * Generate a LEGO Technic-compatible gear.
- * Throws GearValidationError on invalid parameters or a non-watertight result.
+ * Generate an involute spur gear. Throws GearValidationError on invalid input
+ * or a non-watertight result.
  */
-export function generateLegoGear(params: GearParams): THREE.BufferGeometry {
+export function generateInvoluteGear(params: GearParams): THREE.BufferGeometry {
   validate(params);
-  const teeth = params.teeth;
-  const boreType = params.boreType ?? "cross_axle";
+  const pa = params.pressureAngle ?? DEFAULT_PRESSURE_ANGLE;
+  const bore = params.boreDiameter ?? 0;
+  const hub = params.hubDiameter ?? 0;
+  const boreR = bore / 2;
 
-  const shape = new THREE.Shape(involuteGearOutline(teeth));
-  shape.holes.push(asHole(boreProfile(boreType)));
+  const gear = extrudeProfile(
+    involuteGearOutline(params.teeth, params.module, pa),
+    boreR,
+    params.thickness,
+  );
 
-  const geo = new THREE.ExtrudeGeometry(shape, {
-    depth: thicknessMm(params),
-    bevelEnabled: false,
-    steps: 1,
-  });
-  geo.computeVertexNormals();
+  let result = gear;
+  if (hub > 0) {
+    // Boss around the bore, as tall as the gear, protruding above the top face.
+    // Built as its own closed shell and merged with the gear (each watertight,
+    // overlapping) — no 3D boolean needed.
+    const embed = Math.min(params.thickness * 0.25, 0.5);
+    const boss = extrudeProfile(circleProfile(hub / 2), boreR, params.thickness);
+    boss.translate(0, 0, params.thickness - embed);
+    result = mergeGeometries([gear, boss], false);
+  }
 
-  const welded = weld(geo);
-  if (!isWatertight(welded)) {
+  if (!isWatertight(result)) {
     throw new GearValidationError(
-      "Internal error: generated mesh is not watertight; " +
-        "adjust parameters or report this.",
+      "Internal error: generated mesh is not watertight; adjust parameters or report this.",
     );
   }
-  return welded;
+  return result;
 }
 
-/** Build from a preset record (snake_case JSON) — presets stay unchanged data. */
+/** Build params from a preset record (JSON data, decoupled from code). */
 export function gearParamsFromPreset(rec: Record<string, unknown>): GearParams {
   return {
+    module: rec.module as number,
     teeth: rec.teeth as number,
-    thicknessUnits: (rec.thickness_units as number) ?? 1.0,
-    boreType: (rec.bore_type as BoreType) ?? "cross_axle",
-    hubStyle: (rec.hub_style as string) ?? "flat",
+    pressureAngle: (rec.pressureAngle as number) ?? DEFAULT_PRESSURE_ANGLE,
+    boreDiameter: (rec.boreDiameter as number) ?? 0,
+    hubDiameter: (rec.hubDiameter as number) ?? 0,
+    thickness: rec.thickness as number,
   };
 }

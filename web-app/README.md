@@ -1,65 +1,61 @@
-# LEGO Gear Generator — browser (TypeScript port)
+# Involute Spur Gear Generator — browser
 
-A client-side port of the Python `generator/` package. Runs entirely in the
-browser (no server), so it deploys as a static site. Generates the same
-verified module-1 LEGO gears and cross-axle/pin-hole fit gauges, and downloads
-watertight binary `.stl` files via a browser Blob.
+A client-side parametric involute **spur gear** generator. Runs entirely in the
+browser (no server), deploys as a static site, and downloads watertight binary
+`.stl` files via a browser Blob.
+
+Formerly a LEGO-specific tool; now general-purpose — module and pressure angle
+are free inputs and the bore is a plain round hole.
 
 ## Run
 
 ```bash
 npm install
-npm run dev       # dev server
-npm run build     # static site -> dist/ (deploy anywhere static)
-npm run preview   # serve the built dist/
-npm test          # watertightness + dimension + validation matrix
+npm run dev            # dev server
+npm run build          # static site -> dist/
+npm run build:artifact # single self-contained HTML -> dist-artifact/content.html
+npm test               # watertightness + dimensional matrix
 ```
 
-## What was ported, and how it maps
+## Parameters — `generateInvoluteGear(params)`
 
-| Python (trimesh)                | TypeScript (this port)                          |
-|--------------------------------|-------------------------------------------------|
-| `common.py` constants          | `src/common.ts` — every constant 1:1            |
-| `bore_profile()` (shared)      | `boreProfile()` — shared by gears **and** gauge |
-| shapely 2D `.difference()`     | `THREE.Shape` + hole path → `ExtrudeGeometry`   |
-| `trimesh.boolean.union` (labels)| `manifold-3d` (WASM) via `src/csg.ts`          |
-| `mesh.export()`                | `STLExporter` → Blob download (`src/stl.ts`)    |
-| Tkinter GUI                    | React form (`src/gui.tsx`), same fields/messages|
+| Param           | Notes                                             |
+|-----------------|---------------------------------------------------|
+| `module`        | mm per tooth on the pitch circle (typ. 0.5–5)     |
+| `teeth`         | integer ≥ 6 (below 6, involute teeth undercut)    |
+| `pressureAngle` | degrees, default 20 (14.5° legacy allowed)        |
+| `boreDiameter`  | mm, plain round hole (0 = solid centre)           |
+| `hubDiameter`   | 0 = none, or > bore (a boss around the bore)      |
+| `thickness`     | mm                                                |
 
-## Two decisions worth knowing
+**Validation:** `teeth ≥ 6`, `module > 0`, `thickness > 0`, and
+`boreDiameter < pitchDiameter − 2·dedendum` (the bore can't cut into the tooth
+root). Invalid input throws a typed `GearValidationError`.
 
-**1. The bore is a 2D hole, not 3D CSG.** The Python subtracts the bore with a
-2D shapely `.difference()` before extruding — so the faithful port builds a
-`THREE.Shape` with a hole and extrudes it. This is watertight by construction
-and needs no 3D boolean for the gear. (The plus bore is still a genuine
-subtracted plus-shape — just in 2D, exactly like the source.)
+## Geometry approach
 
-**2. The label union uses `manifold-3d`, not the usual three CSG libs.** The
-fit-gauge dot labels are the one place a 3D boolean is needed. Both libraries
-the brief suggested failed the watertight test here:
+- **Gear + bore:** the toothed involute outline is a `THREE.Shape`, the round
+  bore is a hole on that shape, and it's extruded to `thickness` — a single
+  watertight manifold, no 3D boolean.
+- **Optional hub:** a boss around the bore, **as tall as the gear** and
+  protruding one gear-thickness above the top face. It's built as its own
+  closed shell and merged with the gear (each watertight, overlapping) — so
+  the hub needs no CSG either. (Hub height is currently fixed at one gear
+  thickness; easy to expose as a parameter.)
 
-| library         | open boundary edges on the 5-dot union |
-|-----------------|----------------------------------------|
-| three-bvh-csg   | 174 (not watertight)                   |
-| three-csg-ts    | 1025 (not watertight)                  |
-| **manifold-3d** | **0 (watertight)**                     |
-
-`manifold-3d` is the WASM build of the same `manifold3d` engine trimesh used in
-Python, so it guarantees manifold output and matches the Python result exactly.
-WASM init is async — `await initManifold()` once before generating labeled
-gauges (the GUI does this on the fit-gauge button).
+No WASM, no CSG library — the round bore removed the only reason the old LEGO
+version needed one.
 
 ## Verification (`npm test`)
 
-The same matrix the Python port was held to, re-checked independently here:
+Swept across the general parameter space, not fixed sizes:
 
-- **Gears:** 5 teeth (8/16/20/24/40) × 2 bores (cross_axle/pin_hole) — all
-  watertight, correct outer diameter (`teeth + 2 mm`), bore actually subtracted.
-- **Fit gauges:** both bores × full clearance sweep — all watertight after the
-  manifold label union; dot count matches `clearance × 100` by measured volume.
-- **Validation:** bad teeth count, thickness ≤ 0, and bore/root collision throw
-  typed `GearValidationError`s with the same messages as Python.
+- **module** ∈ {0.5, 1, 1.5, 2, 3, 5} × **teeth** ∈ {6, 8, 12, 17, 20, 40} ×
+  **pressure angle** ∈ {14.5°, 20°} — every combination watertight, with the
+  correct tip diameter and `pitch diameter = module × teeth`.
+- **Hub** cases watertight and taller than the gear body.
+- **Validation** errors thrown for teeth < 6, module 0, thickness 0, bore into
+  root, and hub ≤ bore.
 
-Also smoke-tested in headless Chromium: the page renders, gears generate and
-download, and the manifold WASM path runs in-browser (the fit-gauge sweep
-downloads successfully).
+Also smoke-tested in headless Chromium: the form renders, all five sliders and
+the pressure-angle toggle drive the live 3D preview.

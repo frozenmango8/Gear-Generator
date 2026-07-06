@@ -1,16 +1,12 @@
 /**
- * Watertightness matrix — the non-negotiable acceptance test carried over from
- * the Python port. Every teeth x bore-type combination must produce a
- * watertight/manifold mesh, with the bore actually subtracted and the correct
- * LEGO outer diameter. Also covers the fit-gauge CSG path (the flagged risk).
+ * Watertightness + dimensional-correctness matrix for the general-purpose
+ * involute gear generator. Swept across a representative module x teeth x bore
+ * x pressure-angle space (with and without a hub) — not the old fixed sizes.
  */
 
 import * as THREE from "three";
-import { generateLegoGear } from "../src/gears.js";
-import { generateFitGauge, labelMarkCount, initManifold } from "../src/fitgauge.js";
-import { SUPPORTED_TEETH, BoreType } from "../src/common.js";
-
-await initManifold(); // load WASM boolean backend once before the CSG paths
+import { generateInvoluteGear, GearValidationError } from "../src/gears.js";
+import { isWatertight, outerRadius, rootRadius } from "../src/common.js";
 
 let failures = 0;
 const ok = (cond: boolean, msg: string) => {
@@ -18,7 +14,6 @@ const ok = (cond: boolean, msg: string) => {
   if (!cond) failures++;
 };
 
-/** Signed volume of a triangle soup (mm^3). Positive for outward normals. */
 function volume(geo: THREE.BufferGeometry): number {
   const g = geo.index ? geo.toNonIndexed() : geo;
   const p = g.getAttribute("position");
@@ -31,70 +26,80 @@ function volume(geo: THREE.BufferGeometry): number {
   }
   return Math.abs(v);
 }
-
-function outerDiameter(geo: THREE.BufferGeometry): number {
-  geo.computeBoundingBox();
-  const b = geo.boundingBox!;
-  return b.max.x - b.min.x;
+/** True tip diameter = 2x the largest vertex radius (a tooth tip rarely lands
+ *  exactly on an axis, so a bounding-box width underreports it). */
+function tipDiameter(geo: THREE.BufferGeometry): number {
+  const p = geo.getAttribute("position");
+  let maxR = 0;
+  for (let i = 0; i < p.count; i++) {
+    const r = Math.hypot(p.getX(i), p.getY(i));
+    if (r > maxR) maxR = r;
+  }
+  return 2 * maxR;
 }
 
-// isWatertight is re-checked here independently of the generator's internal guard.
-import { isWatertight } from "../src/common.js";
+const modules = [0.5, 1, 1.5, 2, 3, 5];
+const teethSet = [6, 8, 12, 17, 20, 40];
+const angles = [14.5, 20];
 
-const bores: BoreType[] = ["cross_axle", "pin_hole"];
-
-console.log("=== Gears: watertight x OD x bore-subtracted (5 teeth x 2 bores) ===");
-for (const teeth of SUPPORTED_TEETH) {
-  for (const boreType of bores) {
-    const geo = generateLegoGear({ teeth, thicknessUnits: 1, boreType });
-    const wt = isWatertight(geo);
-    const od = outerDiameter(geo);
-    const vol = volume(geo);
-    const solidVol = Math.PI * (od / 2) ** 2 * 3.2; // if it were a plain disc
-    const boreSubtracted = vol < solidVol; // hole removed material
-    const odOk = Math.abs(od - (teeth + 2)) < 0.05;
-    ok(
-      wt && odOk && boreSubtracted,
-      `${String(teeth).padStart(2)}t ${boreType.padEnd(10)} watertight=${wt} OD=${od.toFixed(2)} (want ${teeth + 2}) boreSubtracted=${boreSubtracted}`,
-    );
+console.log("=== Gears: watertight x OD x bore across module x teeth x PA ===");
+for (const module of modules) {
+  for (const teeth of teethSet) {
+    for (const pressureAngle of angles) {
+      // a bore that stays clear of the root (60% of the max legal bore)
+      const bore = +(2 * rootRadius(teeth, module) * 0.6).toFixed(2);
+      const geo = generateInvoluteGear({ module, teeth, pressureAngle, boreDiameter: bore, thickness: 4 });
+      const wt = isWatertight(geo);
+      const od = tipDiameter(geo);
+      const wantOD = 2 * outerRadius(teeth, module); // = module * (teeth + 2)
+      const odOk = Math.abs(od - wantOD) < Math.max(0.02, module * 0.01);
+      const pitchDia = od - 2 * module; // pitch diameter must equal module * teeth
+      const pitchOk = Math.abs(pitchDia - module * teeth) < Math.max(0.02, module * 0.01);
+      const boreSubtracted = volume(geo) < Math.PI * (od / 2) ** 2 * 4;
+      ok(
+        wt && odOk && pitchOk && boreSubtracted,
+        `m=${module} ${String(teeth).padStart(2)}t PA=${pressureAngle} bore=${bore}` +
+          ` watertight=${wt} OD=${od.toFixed(2)}(want ${wantOD.toFixed(2)}) pitchDia=${pitchDia.toFixed(1)}(want ${(module * teeth).toFixed(1)})`,
+      );
+    }
   }
 }
 
-console.log("\n=== Fit gauges: watertight after CSG label union (both bores) ===");
-for (const boreType of bores) {
-  for (const off of [-0.1, -0.05, 0.0, 0.05, 0.1]) {
-    const clearance = Math.round((0.1 + off) * 1e4) / 1e4;
-    const geo = generateFitGauge({ boreType, clearanceOverride: clearance });
-    const wt = isWatertight(geo);
-    ok(wt, `${boreType.padEnd(10)} clr=${clearance.toFixed(2)} dots=${String(labelMarkCount(clearance)).padStart(2)} watertight=${wt}`);
-  }
+console.log("\n=== Hub option: watertight + adds material above the gear ===");
+for (const [module, teeth] of [[1, 20], [2, 16], [1.5, 30]] as const) {
+  const bore = 4;
+  const plain = generateInvoluteGear({ module, teeth, boreDiameter: bore, thickness: 4 });
+  const hubbed = generateInvoluteGear({ module, teeth, boreDiameter: bore, hubDiameter: bore + 6, thickness: 4 });
+  hubbed.computeBoundingBox();
+  const zTop = hubbed.boundingBox!.max.z;
+  const grew = volume(hubbed) > volume(plain) && zTop > 4 + 0.5; // taller than the 4mm gear
+  ok(isWatertight(hubbed) && grew, `m=${module} ${teeth}t + hub: watertight=${isWatertight(hubbed)} topZ=${zTop.toFixed(1)}mm (>4)`);
 }
 
-console.log("\n=== Fit-gauge label count matches clearance*100 (geometry) ===");
-for (const boreType of bores) {
-  for (const clearance of [0.0, 0.05, 0.1, 0.15, 0.2]) {
-    const n = labelMarkCount(clearance);
-    const plain = generateFitGauge({ boreType, clearanceOverride: clearance, embossLabel: false });
-    const labeled = generateFitGauge({ boreType, clearanceOverride: clearance, embossLabel: true });
-    const perDot = Math.PI * 0.5 ** 2 * 0.6; // radius^2 * protrude
-    const added = volume(labeled) - volume(plain);
-    const nGeom = n === 0 ? 0 : Math.round(added / perDot);
-    ok(nGeom === n, `${boreType.padEnd(10)} clr=${clearance.toFixed(2)} expect=${n} geom=${nGeom}`);
-  }
-}
-
-console.log("\n=== Validation errors thrown correctly ===");
-const expectThrow = (fn: () => void, label: string) => {
+console.log("\n=== Validation errors ===");
+const mustThrow = (fn: () => void, label: string) => {
   try {
     fn();
     ok(false, `${label} -> NO ERROR (bug)`);
   } catch (e) {
-    ok(e instanceof Error, `${label} -> ${(e as Error).message}`);
+    ok(e instanceof GearValidationError, `${label} -> ${(e as Error).message}`);
   }
 };
-expectThrow(() => generateLegoGear({ teeth: 7 }), "7t not standard");
-expectThrow(() => generateLegoGear({ teeth: 5, allowCustom: true }), "5t custom undercut");
-expectThrow(() => generateLegoGear({ teeth: 24, thicknessUnits: 0 }), "0 thickness");
+mustThrow(() => generateInvoluteGear({ module: 1, teeth: 5, thickness: 4 }), "5 teeth (< 6)");
+mustThrow(() => generateInvoluteGear({ module: 0, teeth: 20, thickness: 4 }), "module 0");
+mustThrow(() => generateInvoluteGear({ module: 1, teeth: 20, thickness: 0 }), "thickness 0");
+mustThrow(
+  () => generateInvoluteGear({ module: 1, teeth: 20, boreDiameter: 100, thickness: 4 }),
+  "bore into root",
+);
+mustThrow(
+  () => generateInvoluteGear({ module: 1, teeth: 20, boreDiameter: 5, hubDiameter: 3, thickness: 4 }),
+  "hub <= bore",
+);
+
+// a valid custom combo the old LEGO tool could never make
+const exotic = generateInvoluteGear({ module: 3.5, teeth: 11, pressureAngle: 14.5, boreDiameter: 6, thickness: 7 });
+ok(isWatertight(exotic), `exotic m3.5 11t PA14.5 -> watertight=${isWatertight(exotic)}`);
 
 console.log(`\n${failures === 0 ? "ALL TESTS PASSED" : `${failures} FAILURE(S)`}`);
 if (failures > 0) throw new Error(`${failures} test failure(s)`);

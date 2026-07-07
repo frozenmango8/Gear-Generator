@@ -45,6 +45,11 @@ root). Invalid input throws a typed `GearValidationError`.
   the hub needs no CSG either. (Hub height is currently fixed at one gear
   thickness; easy to expose as a parameter.)
 
+- **Matching shaft (`generateShaft`):** a separate download — a round or
+  D-flat pole sized to the current bore minus a printing `clearance` (default
+  0.2 mm) so it slides in, keeping the flat for a keyed fit. Just an extruded
+  bore-shaped profile; watertight, no CSG.
+
 No WASM, no CSG library — the round bore removed the only reason the old LEGO
 version needed one.
 

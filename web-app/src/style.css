@@ -96,6 +96,13 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .primary { background: var(--accent); color: #fff; }
 .btn-row { display: flex; gap: 8px; }
 .btn-row .primary { flex: 1; padding: 11px 8px; font-size: 13px; }
+.shaft-box {
+  display: flex; flex-direction: column; gap: 12px;
+  border: 1px dashed var(--line); border-radius: 10px; padding: 14px;
+}
+.shaft-box > .field-head span:first-child { font-weight: 600; }
+.shaft-box .secondary { width: 100%; }
+.shaft-note { color: var(--muted); font-size: 12.5px; margin-top: -4px; }
 .secondary { background: transparent; color: var(--steel); border-color: var(--line); }
 .msg { margin: 0; font-size: 13.5px; }
 .msg.error { color: var(--err); }

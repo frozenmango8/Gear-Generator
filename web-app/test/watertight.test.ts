@@ -5,7 +5,8 @@
  */
 
 import * as THREE from "three";
-import { generateInvoluteGear, GearValidationError } from "../src/gears.js";
+import { generateInvoluteGear, GearValidationError, BoreShape } from "../src/gears.js";
+import { generateShaft, ShaftError } from "../src/shaft.js";
 import { isWatertight, outerRadius, rootRadius } from "../src/common.js";
 
 let failures = 0;
@@ -88,6 +89,19 @@ for (const [module, teeth, bore, flat] of [[2, 20, 6, 1.5], [1, 16, 4, 1], [3, 2
   ok(isWatertight(dflatHub), `  ...with hub: watertight=${isWatertight(dflatHub)}`);
 }
 
+console.log("\n=== Matching shaft: watertight + fits the bore + correct length ===");
+for (const [boreDiameter, shape, flat] of [[6, "round", 0], [6, "d_flat", 1.5], [10, "d_flat", 3]] as const) {
+  const clr = 0.2;
+  const shaft = generateShaft({ boreDiameter, boreShape: shape as BoreShape, flatDepth: flat, length: 25, clearance: clr });
+  const wt = isWatertight(shaft);
+  const shaftR = tipDiameter(shaft) / 2; // largest radius of the shaft cross-section
+  const fits = shaftR <= boreDiameter / 2 - clr + 0.02; // smaller than the bore by ~clearance
+  shaft.computeBoundingBox();
+  const len = shaft.boundingBox!.max.z - shaft.boundingBox!.min.z;
+  ok(wt && fits && Math.abs(len - 25) < 0.01,
+    `bore=${boreDiameter} ${shape}: watertight=${wt} shaftR=${shaftR.toFixed(2)}(<= ${(boreDiameter / 2 - clr).toFixed(2)}) len=${len.toFixed(1)}`);
+}
+
 console.log("\n=== Validation errors ===");
 const mustThrow = (fn: () => void, label: string) => {
   try {
@@ -116,6 +130,18 @@ mustThrow(
   () => generateInvoluteGear({ module: 2, teeth: 20, boreDiameter: 6, boreShape: "d_flat", flatDepth: 6, thickness: 4 }),
   "d_flat flatDepth >= bore",
 );
+
+const mustThrowShaft = (fn: () => void, label: string) => {
+  try {
+    fn();
+    ok(false, `${label} -> NO ERROR (bug)`);
+  } catch (e) {
+    ok(e instanceof ShaftError, `${label} -> ${(e as Error).message}`);
+  }
+};
+mustThrowShaft(() => generateShaft({ boreDiameter: 0, length: 20 }), "shaft with no bore");
+mustThrowShaft(() => generateShaft({ boreDiameter: 6, length: 0 }), "shaft length 0");
+mustThrowShaft(() => generateShaft({ boreDiameter: 0.4, length: 20, clearance: 0.2 }), "bore too small for shaft");
 
 // a valid custom combo the old LEGO tool could never make
 const exotic = generateInvoluteGear({ module: 3.5, teeth: 11, pressureAngle: 14.5, boreDiameter: 6, thickness: 7 });

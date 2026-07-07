@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import * as THREE from "three";
 import { rootRadius, outerRadius, DEFAULT_PRESSURE_ANGLE, MIN_TEETH } from "./common.js";
 import { generateInvoluteGear, GearParams, GearValidationError, BoreShape } from "./gears.js";
+import { generateShaft, ShaftError } from "./shaft.js";
 import { downloadStl } from "./stl.js";
 import GearPreview from "./GearPreview.js";
 import MeshPreview from "./MeshPreview.js";
@@ -26,6 +27,8 @@ export default function App() {
   const [flatDepth, setFlatDepth] = useState(1.5);
   const [hub, setHub] = useState(0);
   const [thickness, setThickness] = useState(6);
+  const [shaftLength, setShaftLength] = useState(30);
+  const [shaftClearance, setShaftClearance] = useState(0.2);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null);
@@ -79,6 +82,18 @@ export default function App() {
       setError("");
     } catch (e) {
       setError(e instanceof GearValidationError ? e.message : String(e));
+    }
+  };
+
+  const downloadShaft = () => {
+    try {
+      const geo = generateShaft({ boreDiameter: bore, boreShape, flatDepth, length: shaftLength, clearance: shaftClearance });
+      const suffix = boreShape === "d_flat" ? "_dflat" : "";
+      downloadStl(geo, `shaft_d${bore}${suffix}_L${shaftLength}.stl`);
+      setStatus(`Downloaded shaft: ⌀${(bore - 2 * shaftClearance).toFixed(1)} mm × ${shaftLength} mm (${shaftClearance.toFixed(2)} mm clearance).`);
+      setError("");
+    } catch (e) {
+      setError(e instanceof ShaftError ? e.message : String(e));
     }
   };
 
@@ -205,6 +220,28 @@ export default function App() {
             <input type="range" min={1} max={20} step={0.5} value={thickness}
               onChange={(e) => setThickness(Number(e.target.value))} />
           </div>
+
+          {mode === "single" && bore > 0 && (
+            <div className="shaft-box">
+              <div className="field-head"><span>Matching shaft (pole)</span></div>
+              <small className="shaft-note">
+                A {boreShape === "d_flat" ? "D-flat" : "round"} shaft sized to slide into this bore
+                {boreShape === "d_flat" ? " and key against rotation." : "."}
+              </small>
+              <div className="field">
+                <div className="field-head"><span>Length</span><span className="val">{shaftLength} mm</span></div>
+                <input type="range" min={5} max={80} step={1} value={shaftLength}
+                  onChange={(e) => setShaftLength(Number(e.target.value))} />
+              </div>
+              <div className="field">
+                <div className="field-head"><span>Fit clearance</span><span className="val">{shaftClearance.toFixed(2)} mm</span></div>
+                <input type="range" min={0} max={0.5} step={0.05} value={shaftClearance}
+                  onChange={(e) => setShaftClearance(Number(e.target.value))} />
+                <small>gap so it slides in; bigger = looser. 0.20 mm is a good FDM start.</small>
+              </div>
+              <button className="secondary" onClick={downloadShaft}>Download matching shaft</button>
+            </div>
+          )}
 
           {mode === "pair" ? (
             <div className="btn-row">

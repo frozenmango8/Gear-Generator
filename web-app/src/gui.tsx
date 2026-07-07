@@ -8,7 +8,7 @@
 import { useEffect, useState } from "react";
 import * as THREE from "three";
 import { rootRadius, outerRadius, DEFAULT_PRESSURE_ANGLE, MIN_TEETH } from "./common.js";
-import { generateInvoluteGear, GearParams, GearValidationError } from "./gears.js";
+import { generateInvoluteGear, GearParams, GearValidationError, BoreShape } from "./gears.js";
 import { downloadStl } from "./stl.js";
 import GearPreview from "./GearPreview.js";
 import MeshPreview from "./MeshPreview.js";
@@ -22,6 +22,8 @@ export default function App() {
   const [teethB, setTeethB] = useState(12);
   const [pressureAngle, setPressureAngle] = useState(DEFAULT_PRESSURE_ANGLE);
   const [bore, setBore] = useState(6);
+  const [boreShape, setBoreShape] = useState<BoreShape>("round");
+  const [flatDepth, setFlatDepth] = useState(1.5);
   const [hub, setHub] = useState(0);
   const [thickness, setThickness] = useState(6);
   const [error, setError] = useState("");
@@ -32,13 +34,18 @@ export default function App() {
   // dynamic limits so sliders can't cross into invalid geometry
   const maxBore = Math.max(0, +(2 * rootRadius(teeth, module) - 0.2).toFixed(1));
   const maxHub = +(2 * outerRadius(teeth, module) - 0.4).toFixed(1);
+  const maxFlat = Math.max(0.2, +(bore * 0.9).toFixed(1));
 
   useEffect(() => {
     if (bore > maxBore) setBore(maxBore);
     if (hub !== 0 && hub > maxHub) setHub(maxHub);
-  }, [maxBore, maxHub]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (flatDepth > maxFlat) setFlatDepth(maxFlat);
+  }, [maxBore, maxHub, maxFlat]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const params: GearParams = { module, teeth, pressureAngle, boreDiameter: bore, hubDiameter: mode === "single" ? hub : 0, thickness };
+  const params: GearParams = {
+    module, teeth, pressureAngle, boreDiameter: bore, boreShape, flatDepth,
+    hubDiameter: mode === "single" ? hub : 0, thickness,
+  };
 
   // gear A
   useEffect(() => {
@@ -49,23 +56,25 @@ export default function App() {
       setGeometry(null);
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [module, teeth, pressureAngle, bore, hub, thickness, mode]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [module, teeth, pressureAngle, bore, boreShape, flatDepth, hub, thickness, mode]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // gear B (pair mode) — shares module / pressure angle / thickness
+  // gear B (pair mode) — shares module / pressure angle / thickness / bore shape
   useEffect(() => {
     if (mode !== "pair") return;
     try {
       const boreB = Math.max(0, Math.min(bore, 2 * rootRadius(teethB, module) - 0.5));
-      setGeometryB(generateInvoluteGear({ module, teeth: teethB, pressureAngle, boreDiameter: boreB, thickness }));
+      const flatB = Math.min(flatDepth, boreB * 0.9);
+      setGeometryB(generateInvoluteGear({ module, teeth: teethB, pressureAngle, boreDiameter: boreB, boreShape, flatDepth: flatB, thickness }));
     } catch {
       setGeometryB(null);
     }
-  }, [mode, module, teethB, pressureAngle, bore, thickness]);
+  }, [mode, module, teethB, pressureAngle, bore, boreShape, flatDepth, thickness]);
 
   const download = (t: number, geo: THREE.BufferGeometry | null) => {
     if (!geo) return;
     try {
-      downloadStl(geo, `gear_m${module}_${t}t.stl`);
+      const suffix = bore > 0 && boreShape === "d_flat" ? "_dflat" : "";
+      downloadStl(geo, `gear_m${module}_${t}t${suffix}.stl`);
       setStatus(`Downloaded ${t}t gear, module ${module} (${(module * t).toFixed(1)} mm pitch dia).`);
       setError("");
     } catch (e) {
@@ -155,8 +164,32 @@ export default function App() {
             <div className="field-head"><span>Bore diameter</span><span className="val">{bore.toFixed(1)} mm</span></div>
             <input type="range" min={0} max={maxBore} step={0.5} value={Math.min(bore, maxBore)}
               onChange={(e) => setBore(Number(e.target.value))} />
-            <small>round hole (0 = solid centre)</small>
+            <small>hole diameter (0 = solid centre)</small>
           </div>
+
+          {bore > 0 && (
+            <fieldset className="field">
+              <span>Bore shape</span>
+              <div className="seg">
+                {(["round", "d_flat"] as BoreShape[]).map((s) => (
+                  <button key={s} type="button" aria-pressed={boreShape === s}
+                    onClick={() => setBoreShape(s)}>
+                    {s === "round" ? "Round" : "D-flat (D-shaft)"}
+                  </button>
+                ))}
+              </div>
+              <small>D-flat matches a flatted motor shaft so the gear can't spin free</small>
+            </fieldset>
+          )}
+
+          {bore > 0 && boreShape === "d_flat" && (
+            <div className="field">
+              <div className="field-head"><span>Flat depth</span><span className="val">{flatDepth.toFixed(1)} mm</span></div>
+              <input type="range" min={0.2} max={maxFlat} step={0.1} value={Math.min(flatDepth, maxFlat)}
+                onChange={(e) => setFlatDepth(Number(e.target.value))} />
+              <small>how much the flat cuts into the round bore</small>
+            </div>
+          )}
 
           {mode === "single" && (
             <div className="field">

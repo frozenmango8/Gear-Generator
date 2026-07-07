@@ -95,6 +95,24 @@ export function circleProfile(radius: number, segments = 64): THREE.Vector2[] {
   return pts;
 }
 
+/**
+ * Round bore with one flat side (a "D" bore) for D-shafts. `flatDepth` is how
+ * much material the flat removes from the round edge (mm). The round part still
+ * has the full `radius`; the closing edge of the returned loop forms the flat.
+ */
+export function dFlatProfile(radius: number, flatDepth: number, segments = 64): THREE.Vector2[] {
+  const xf = radius - flatDepth; // x of the flat chord
+  if (flatDepth <= 0 || xf <= -radius) return circleProfile(radius, segments);
+  const thetaF = Math.acos(Math.max(-1, Math.min(1, xf / radius)));
+  const span = 2 * Math.PI - 2 * thetaF; // major arc, skipping the flat side
+  const pts: THREE.Vector2[] = [];
+  for (let i = 0; i <= segments; i++) {
+    const a = thetaF + (span * i) / segments;
+    pts.push(new THREE.Vector2(radius * Math.cos(a), radius * Math.sin(a)));
+  }
+  return pts;
+}
+
 export function signedArea(points: THREE.Vector2[]): number {
   let area = 0;
   for (let i = 0; i < points.length; i++) {

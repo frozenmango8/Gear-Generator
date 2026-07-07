@@ -14,17 +14,22 @@ import {
   DEDENDUM_FACTOR,
   involuteGearOutline,
   circleProfile,
+  dFlatProfile,
   asHole,
   rootRadius,
   weld,
   isWatertight,
 } from "./common.js";
 
+export type BoreShape = "round" | "d_flat";
+
 export interface GearParams {
   module: number; // mm per tooth on the pitch circle
   teeth: number; // integer >= 6
   pressureAngle?: number; // degrees, default 20 (14.5 legacy allowed)
-  boreDiameter?: number; // mm, plain round hole (0 = solid centre)
+  boreDiameter?: number; // mm, hole diameter (0 = solid centre)
+  boreShape?: BoreShape; // "round" (default) or "d_flat" (D-shaft flat)
+  flatDepth?: number; // mm removed by the flat, for boreShape "d_flat"
   hubDiameter?: number; // 0 = none, or > boreDiameter (boss around the bore)
   thickness: number; // mm
 }
@@ -66,6 +71,16 @@ export function validate(p: GearParams): void {
     );
   }
 
+  // D-flat: the flat must remove some material but not more than the bore.
+  if ((p.boreShape ?? "round") === "d_flat" && bore > 0) {
+    const flat = p.flatDepth ?? 0;
+    if (!(flat > 0 && flat < bore)) {
+      throw new GearValidationError(
+        `Flat depth must be between 0 and the bore diameter (${bore.toFixed(2)} mm).`,
+      );
+    }
+  }
+
   const hub = p.hubDiameter ?? 0;
   if (hub !== 0) {
     if (hub <= bore) {
@@ -77,16 +92,27 @@ export function validate(p: GearParams): void {
   }
 }
 
-/** Extrude a toothed/round profile (optionally with a round hole) to a solid. */
-function extrudeProfile(
+/** Extrude an outline (optionally with a hole of any shape) to a solid. */
+function extrudeWithHole(
   outline: THREE.Vector2[],
-  holeRadius: number,
+  hole: THREE.Vector2[] | null,
   depth: number,
 ): THREE.BufferGeometry {
   const shape = new THREE.Shape(outline);
-  if (holeRadius > 0) shape.holes.push(asHole(circleProfile(holeRadius)));
+  if (hole) shape.holes.push(asHole(hole));
   const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false, steps: 1 });
   return weld(geo);
+}
+
+/** The bore hole profile for the requested shape (null when there's no bore). */
+function boreOutline(p: GearParams): THREE.Vector2[] | null {
+  const bore = p.boreDiameter ?? 0;
+  if (bore <= 0) return null;
+  const r = bore / 2;
+  if ((p.boreShape ?? "round") === "d_flat") {
+    return dFlatProfile(r, p.flatDepth ?? r * 0.3);
+  }
+  return circleProfile(r);
 }
 
 /**
@@ -96,13 +122,12 @@ function extrudeProfile(
 export function generateInvoluteGear(params: GearParams): THREE.BufferGeometry {
   validate(params);
   const pa = params.pressureAngle ?? DEFAULT_PRESSURE_ANGLE;
-  const bore = params.boreDiameter ?? 0;
   const hub = params.hubDiameter ?? 0;
-  const boreR = bore / 2;
 
-  const gear = extrudeProfile(
+  const hole = boreOutline(params);
+  const gear = extrudeWithHole(
     involuteGearOutline(params.teeth, params.module, pa),
-    boreR,
+    hole,
     params.thickness,
   );
 
@@ -110,9 +135,10 @@ export function generateInvoluteGear(params: GearParams): THREE.BufferGeometry {
   if (hub > 0) {
     // Boss around the bore, as tall as the gear, protruding above the top face.
     // Built as its own closed shell and merged with the gear (each watertight,
-    // overlapping) — no 3D boolean needed.
+    // overlapping) — no 3D boolean needed. The bore (incl. any flat) runs
+    // through the boss too.
     const embed = Math.min(params.thickness * 0.25, 0.5);
-    const boss = extrudeProfile(circleProfile(hub / 2), boreR, params.thickness);
+    const boss = extrudeWithHole(circleProfile(hub / 2), hole, params.thickness);
     boss.translate(0, 0, params.thickness - embed);
     result = mergeGeometries([gear, boss], false);
   }
@@ -132,6 +158,8 @@ export function gearParamsFromPreset(rec: Record<string, unknown>): GearParams {
     teeth: rec.teeth as number,
     pressureAngle: (rec.pressureAngle as number) ?? DEFAULT_PRESSURE_ANGLE,
     boreDiameter: (rec.boreDiameter as number) ?? 0,
+    boreShape: (rec.boreShape as BoreShape) ?? "round",
+    flatDepth: rec.flatDepth as number | undefined,
     hubDiameter: (rec.hubDiameter as number) ?? 0,
     thickness: rec.thickness as number,
   };

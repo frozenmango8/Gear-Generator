@@ -24,7 +24,9 @@ npm test               # watertightness + dimensional matrix
 | `module`        | mm per tooth on the pitch circle (typ. 0.5–5)     |
 | `teeth`         | integer ≥ 6 (below 6, involute teeth undercut)    |
 | `pressureAngle` | degrees, default 20 (14.5° legacy allowed)        |
-| `boreDiameter`  | mm, plain round hole (0 = solid centre)           |
+| `boreDiameter`  | mm, hole diameter (0 = solid centre)              |
+| `boreShape`     | `"round"` (default) or `"d_flat"` (D-shaft flat)  |
+| `flatDepth`     | mm the flat removes, for `boreShape: "d_flat"`    |
 | `hubDiameter`   | 0 = none, or > bore (a boss around the bore)      |
 | `thickness`     | mm                                                |
 

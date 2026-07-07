@@ -76,6 +76,18 @@ for (const [module, teeth] of [[1, 20], [2, 16], [1.5, 30]] as const) {
   ok(isWatertight(hubbed) && grew, `m=${module} ${teeth}t + hub: watertight=${isWatertight(hubbed)} topZ=${zTop.toFixed(1)}mm (>4)`);
 }
 
+console.log("\n=== D-flat bore: watertight + flat present + runs through hub ===");
+for (const [module, teeth, bore, flat] of [[2, 20, 6, 1.5], [1, 16, 4, 1], [3, 24, 8, 2.5]] as const) {
+  const round = generateInvoluteGear({ module, teeth, boreDiameter: bore, thickness: 4 });
+  const dflat = generateInvoluteGear({ module, teeth, boreDiameter: bore, boreShape: "d_flat", flatDepth: flat, thickness: 4 });
+  // the flat leaves material a round bore would remove -> more volume than round
+  const flatPresent = volume(dflat) > volume(round) + 0.01;
+  ok(isWatertight(dflat) && flatPresent,
+    `m=${module} ${teeth}t bore=${bore} flat=${flat}: watertight=${isWatertight(dflat)} flatPresent=${flatPresent}`);
+  const dflatHub = generateInvoluteGear({ module, teeth, boreDiameter: bore, boreShape: "d_flat", flatDepth: flat, hubDiameter: bore + 6, thickness: 4 });
+  ok(isWatertight(dflatHub), `  ...with hub: watertight=${isWatertight(dflatHub)}`);
+}
+
 console.log("\n=== Validation errors ===");
 const mustThrow = (fn: () => void, label: string) => {
   try {
@@ -95,6 +107,14 @@ mustThrow(
 mustThrow(
   () => generateInvoluteGear({ module: 1, teeth: 20, boreDiameter: 5, hubDiameter: 3, thickness: 4 }),
   "hub <= bore",
+);
+mustThrow(
+  () => generateInvoluteGear({ module: 2, teeth: 20, boreDiameter: 6, boreShape: "d_flat", flatDepth: 0, thickness: 4 }),
+  "d_flat flatDepth 0",
+);
+mustThrow(
+  () => generateInvoluteGear({ module: 2, teeth: 20, boreDiameter: 6, boreShape: "d_flat", flatDepth: 6, thickness: 4 }),
+  "d_flat flatDepth >= bore",
 );
 
 // a valid custom combo the old LEGO tool could never make

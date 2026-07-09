@@ -36,12 +36,20 @@ export function outerRadius(teeth: number, module: number): number {
 // 2D profiles (returned as Vector2 loops) — extruded later                    //
 // --------------------------------------------------------------------------- //
 
-/** Ordered points of the full involute gear outline. */
+/**
+ * Ordered points of the full involute gear outline.
+ *
+ * `backlash` (mm) thins each tooth's circular thickness at the pitch line by
+ * that amount (each flank pulled in by backlash/2), widening the gap so a
+ * printed pair meshes with clearance at the standard centre distance instead
+ * of binding. 0 = mathematically exact teeth.
+ */
 export function involuteGearOutline(
   teeth: number,
   module: number,
   pressureAngleDeg: number = DEFAULT_PRESSURE_ANGLE,
   steps = 8,
+  backlash = 0,
 ): THREE.Vector2[] {
   const pa = THREE.MathUtils.degToRad(pressureAngleDeg);
   const rPitch = pitchRadius(teeth, module);
@@ -50,7 +58,9 @@ export function involuteGearOutline(
   const rRoot = rootRadius(teeth, module);
 
   const invPa = Math.tan(pa) - pa;
-  const halfTooth = Math.PI / (2 * teeth);
+  // pull each flank in by the angular equivalent of backlash/2 at the pitch circle
+  const dTheta = backlash / 2 / rPitch;
+  const halfTooth = Math.PI / (2 * teeth) - dTheta;
 
   const flank = (r: number): number => {
     const rr = Math.max(r, rBase);

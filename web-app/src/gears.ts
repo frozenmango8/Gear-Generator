@@ -32,6 +32,7 @@ export interface GearParams {
   flatDepth?: number; // mm removed by the flat, for boreShape "d_flat"
   hubDiameter?: number; // 0 = none, or > boreDiameter (boss around the bore)
   thickness: number; // mm
+  backlash?: number; // mm tooth-thickness reduction per gear (default 0)
 }
 
 /** Typed validation error. */
@@ -58,6 +59,14 @@ export function validate(p: GearParams): void {
   }
   if (!(p.thickness > 0)) {
     throw new GearValidationError("Thickness must be greater than 0 mm.");
+  }
+
+  const backlash = p.backlash ?? 0;
+  // tooth thickness at the pitch line is pi*module/2; keep backlash well under it
+  if (backlash < 0 || backlash >= (Math.PI * p.module) / 4) {
+    throw new GearValidationError(
+      `Backlash must be between 0 and ${((Math.PI * p.module) / 4).toFixed(2)} mm for this module.`,
+    );
   }
 
   const bore = p.boreDiameter ?? 0;
@@ -126,7 +135,7 @@ export function generateInvoluteGear(params: GearParams): THREE.BufferGeometry {
 
   const hole = boreOutline(params);
   const gear = extrudeWithHole(
-    involuteGearOutline(params.teeth, params.module, pa),
+    involuteGearOutline(params.teeth, params.module, pa, 8, params.backlash ?? 0),
     hole,
     params.thickness,
   );
@@ -162,5 +171,6 @@ export function gearParamsFromPreset(rec: Record<string, unknown>): GearParams {
     flatDepth: rec.flatDepth as number | undefined,
     hubDiameter: (rec.hubDiameter as number) ?? 0,
     thickness: rec.thickness as number,
+    backlash: (rec.backlash as number) ?? 0,
   };
 }

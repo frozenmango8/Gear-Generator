@@ -29,6 +29,7 @@ npm test               # watertightness + dimensional matrix
 | `flatDepth`     | mm the flat removes, for `boreShape: "d_flat"`    |
 | `hubDiameter`   | 0 = none, or > bore (a boss around the bore)      |
 | `thickness`     | mm                                                |
+| `backlash`      | mm tooth-thinning so a printed pair turns free (0 = exact) |
 
 **Validation:** `teeth ≥ 6`, `module > 0`, `thickness > 0`, and
 `boreDiameter < pitchDiameter − 2·dedendum` (the bore can't cut into the tooth

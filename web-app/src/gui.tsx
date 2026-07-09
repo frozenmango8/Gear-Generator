@@ -27,6 +27,7 @@ export default function App() {
   const [flatDepth, setFlatDepth] = useState(1.5);
   const [hub, setHub] = useState(0);
   const [thickness, setThickness] = useState(6);
+  const [backlash, setBacklash] = useState(0.1);
   const [shaftLength, setShaftLength] = useState(30);
   const [shaftClearance, setShaftClearance] = useState(0.2);
   const [error, setError] = useState("");
@@ -38,16 +39,18 @@ export default function App() {
   const maxBore = Math.max(0, +(2 * rootRadius(teeth, module) - 0.2).toFixed(1));
   const maxHub = +(2 * outerRadius(teeth, module) - 0.4).toFixed(1);
   const maxFlat = Math.max(0.2, +(bore * 0.9).toFixed(1));
+  const maxBacklash = +Math.min(0.6, module * 0.4).toFixed(2);
 
   useEffect(() => {
     if (bore > maxBore) setBore(maxBore);
     if (hub !== 0 && hub > maxHub) setHub(maxHub);
     if (flatDepth > maxFlat) setFlatDepth(maxFlat);
-  }, [maxBore, maxHub, maxFlat]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (backlash > maxBacklash) setBacklash(maxBacklash);
+  }, [maxBore, maxHub, maxFlat, maxBacklash]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const params: GearParams = {
     module, teeth, pressureAngle, boreDiameter: bore, boreShape, flatDepth,
-    hubDiameter: mode === "single" ? hub : 0, thickness,
+    hubDiameter: mode === "single" ? hub : 0, thickness, backlash,
   };
 
   // gear A
@@ -59,19 +62,19 @@ export default function App() {
       setGeometry(null);
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [module, teeth, pressureAngle, bore, boreShape, flatDepth, hub, thickness, mode]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [module, teeth, pressureAngle, bore, boreShape, flatDepth, hub, thickness, backlash, mode]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // gear B (pair mode) — shares module / pressure angle / thickness / bore shape
+  // gear B (pair mode) — shares module / pressure angle / thickness / bore shape / backlash
   useEffect(() => {
     if (mode !== "pair") return;
     try {
       const boreB = Math.max(0, Math.min(bore, 2 * rootRadius(teethB, module) - 0.5));
       const flatB = Math.min(flatDepth, boreB * 0.9);
-      setGeometryB(generateInvoluteGear({ module, teeth: teethB, pressureAngle, boreDiameter: boreB, boreShape, flatDepth: flatB, thickness }));
+      setGeometryB(generateInvoluteGear({ module, teeth: teethB, pressureAngle, boreDiameter: boreB, boreShape, flatDepth: flatB, thickness, backlash }));
     } catch {
       setGeometryB(null);
     }
-  }, [mode, module, teethB, pressureAngle, bore, boreShape, flatDepth, thickness]);
+  }, [mode, module, teethB, pressureAngle, bore, boreShape, flatDepth, thickness, backlash]);
 
   const download = (t: number, geo: THREE.BufferGeometry | null) => {
     if (!geo) return;
@@ -219,6 +222,13 @@ export default function App() {
             <div className="field-head"><span>Thickness</span><span className="val">{thickness.toFixed(1)} mm</span></div>
             <input type="range" min={1} max={20} step={0.5} value={thickness}
               onChange={(e) => setThickness(Number(e.target.value))} />
+          </div>
+
+          <div className="field">
+            <div className="field-head"><span>Backlash</span><span className="val">{backlash === 0 ? "none" : `${backlash.toFixed(2)} mm`}</span></div>
+            <input type="range" min={0} max={maxBacklash} step={0.02} value={Math.min(backlash, maxBacklash)}
+              onChange={(e) => setBacklash(Number(e.target.value))} />
+            <small>thins teeth so a printed pair turns free instead of binding. ~0.1 mm suits FDM</small>
           </div>
 
           {mode === "single" && bore > 0 && (

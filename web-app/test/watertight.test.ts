@@ -7,7 +7,7 @@
 import * as THREE from "three";
 import { generateInvoluteGear, GearValidationError, BoreShape } from "../src/gears.js";
 import { generateShaft, ShaftError } from "../src/shaft.js";
-import { isWatertight, outerRadius, rootRadius } from "../src/common.js";
+import { isWatertight, outerRadius, rootRadius, pitchRadius, involuteGearOutline } from "../src/common.js";
 
 let failures = 0;
 const ok = (cond: boolean, msg: string) => {
@@ -89,6 +89,23 @@ for (const [module, teeth, bore, flat] of [[2, 20, 6, 1.5], [1, 16, 4, 1], [3, 2
   ok(isWatertight(dflatHub), `  ...with hub: watertight=${isWatertight(dflatHub)}`);
 }
 
+console.log("\n=== Backlash: thins teeth by the requested amount, stays watertight ===");
+for (const [module, teeth] of [[2, 20], [1, 16], [3, 24]] as const) {
+  const bl = 0.2;
+  const steps = 8;
+  // tooth 0 tip flanks are at outline indices `steps` and `steps+1`
+  const tipAngWidth = (o: THREE.Vector2[]) =>
+    Math.abs(Math.atan2(o[steps + 1].y, o[steps + 1].x) - Math.atan2(o[steps].y, o[steps].x));
+  const w0 = tipAngWidth(involuteGearOutline(teeth, module, 20, steps, 0));
+  const wB = tipAngWidth(involuteGearOutline(teeth, module, 20, steps, bl));
+  const reduction = w0 - wB; // angular tooth-width reduction at the tip
+  const expected = bl / pitchRadius(teeth, module); // = 2 * (backlash/2/pitchR)
+  const amountOk = Math.abs(reduction - expected) < 1e-4;
+  const g = generateInvoluteGear({ module, teeth, boreDiameter: 4, thickness: 4, backlash: bl });
+  ok(amountOk && isWatertight(g),
+    `m=${module} ${teeth}t backlash=${bl}: reduction=${reduction.toFixed(4)} rad (want ${expected.toFixed(4)}) watertight=${isWatertight(g)}`);
+}
+
 console.log("\n=== Matching shaft: watertight + fits the bore + correct length ===");
 for (const [boreDiameter, shape, flat] of [[6, "round", 0], [6, "d_flat", 1.5], [10, "d_flat", 3]] as const) {
   const clr = 0.2;
@@ -129,6 +146,10 @@ mustThrow(
 mustThrow(
   () => generateInvoluteGear({ module: 2, teeth: 20, boreDiameter: 6, boreShape: "d_flat", flatDepth: 6, thickness: 4 }),
   "d_flat flatDepth >= bore",
+);
+mustThrow(
+  () => generateInvoluteGear({ module: 1, teeth: 20, thickness: 4, backlash: 2 }),
+  "backlash too large",
 );
 
 const mustThrowShaft = (fn: () => void, label: string) => {

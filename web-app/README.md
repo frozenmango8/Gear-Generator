@@ -54,6 +54,18 @@ root). Invalid input throws a typed `GearValidationError`.
 No WASM, no CSG library — the round bore removed the only reason the old LEGO
 version needed one.
 
+## 3D preview
+
+`GearPreview` and `MeshPreview` build the renderer/scene/camera/controls
+**once** and reuse them; only the mesh geometry is swapped when parameters
+change (previously the whole WebGL scene was torn down and rebuilt on every
+slider tick, which stuttered on lower-powered devices, phones especially).
+
+Drag to orbit, scroll/pinch to zoom (`OrbitControls`, damped, panning
+disabled). The gear auto-spins in-plane until you interact with it (single
+preview) or spins continuously as the meshing demo (pair preview) — either
+way, orbiting works at any time.
+
 ## Verification (`npm test`)
 
 Swept across the general parameter space, not fixed sizes:

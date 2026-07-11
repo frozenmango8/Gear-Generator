@@ -66,6 +66,16 @@ disabled). The gear auto-spins in-plane until you interact with it (single
 preview) or spins continuously as the meshing demo (pair preview) — either
 way, orbiting works at any time.
 
+When a bore is set, `GearPreview` can also render the matching shaft **seated
+in the bore** (toggle: "Show shaft seated in the bore"), so the fit is
+something you can see before printing, not just numbers you trust. The gear
+spins in its own group; the shaft is added directly to the scene (world-fixed)
+so it stays put, like a real stationary axle the gear turns on. Both the bore
+and the shaft profile are built around the same (0,0) origin in `common.ts` /
+`shaft.ts`, and only the Z axis is re-centred for display — so the shaft lands
+exactly seated, including the flat orientation on a D-flat bore, with no
+separate alignment step needed.
+
 ## Presets
 
 Three JSON presets under `src/presets/` (module/teeth/bore/hub combos you

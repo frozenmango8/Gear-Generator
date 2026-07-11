@@ -36,10 +36,12 @@ export default function App() {
   const [backlash, setBacklash] = useState(0.1);
   const [shaftLength, setShaftLength] = useState(30);
   const [shaftClearance, setShaftClearance] = useState(0.2);
+  const [showShaftInPreview, setShowShaftInPreview] = useState(true);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null);
   const [geometryB, setGeometryB] = useState<THREE.BufferGeometry | null>(null);
+  const [shaftPreview, setShaftPreview] = useState<THREE.BufferGeometry | null>(null);
 
   // dynamic limits so sliders can't cross into invalid geometry
   const maxBore = Math.max(0, +(2 * rootRadius(teeth, module) - 0.2).toFixed(1));
@@ -88,6 +90,20 @@ export default function App() {
       setGeometryB(null);
     }
   }, [mode, module, teethB, pressureAngle, bore, boreShape, flatDepth, thickness, backlash]);
+
+  // matching-shaft preview geometry — seated in the bore so the fit is visible
+  // before printing, not just trusted from the numbers
+  useEffect(() => {
+    if (mode !== "single" || bore <= 0 || !showShaftInPreview) {
+      setShaftPreview(null);
+      return;
+    }
+    try {
+      setShaftPreview(generateShaft({ boreDiameter: bore, boreShape, flatDepth, length: shaftLength, clearance: shaftClearance }));
+    } catch {
+      setShaftPreview(null);
+    }
+  }, [mode, bore, boreShape, flatDepth, shaftLength, shaftClearance, showShaftInPreview]);
 
   const download = (t: number, geo: THREE.BufferGeometry | null) => {
     if (!geo) return;
@@ -148,7 +164,7 @@ export default function App() {
           {mode === "pair" ? (
             <MeshPreview gearA={geometry} gearB={geometryB} teethA={teeth} teethB={teethB} module={module} />
           ) : (
-            <GearPreview geometry={geometry} />
+            <GearPreview geometry={geometry} shaft={shaftPreview} />
           )}
           <div className="readout">
             {mode === "pair" ? (
@@ -161,6 +177,7 @@ export default function App() {
               <>
                 <span>pitch &oslash; <b>{(module * teeth).toFixed(1)}</b> mm</span>
                 <span>outer &oslash; <b>{(2 * outerRadius(teeth, module)).toFixed(1)}</b> mm</span>
+                {shaftPreview && <span>shaft <b>⌀{(bore - 2 * shaftClearance).toFixed(1)}</b> seated in bore</span>}
               </>
             )}
           </div>
@@ -305,6 +322,11 @@ export default function App() {
                   onChange={(e) => setShaftClearance(Number(e.target.value))} />
                 <small>gap so it slides in; bigger = looser. 0.20 mm is a good FDM start.</small>
               </div>
+              <label className="radio">
+                <input type="checkbox" checked={showShaftInPreview}
+                  onChange={(e) => setShowShaftInPreview(e.target.checked)} />
+                Show shaft seated in the bore (preview)
+              </label>
               <button className="secondary" onClick={downloadShaft}>Download matching shaft</button>
             </div>
           )}

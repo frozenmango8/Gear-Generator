@@ -31,6 +31,7 @@ export interface GearParams {
   boreShape?: BoreShape; // "round" (default) or "d_flat" (D-shaft flat)
   flatDepth?: number; // mm removed by the flat, for boreShape "d_flat"
   hubDiameter?: number; // 0 = none, or > boreDiameter (boss around the bore)
+  hubHeight?: number; // mm the hub protrudes above the top face (default: thickness)
   thickness: number; // mm
   backlash?: number; // mm tooth-thickness reduction per gear (default 0)
 }
@@ -98,6 +99,10 @@ export function validate(p: GearParams): void {
     if (hub >= 2 * (rootRadius(p.teeth, p.module) + DEDENDUM_FACTOR * p.module)) {
       throw new GearValidationError("Hub diameter must be smaller than the pitch diameter.");
     }
+    const hubHeight = p.hubHeight ?? p.thickness;
+    if (!(hubHeight > 0)) {
+      throw new GearValidationError("Hub height must be greater than 0 mm.");
+    }
   }
 }
 
@@ -142,12 +147,14 @@ export function generateInvoluteGear(params: GearParams): THREE.BufferGeometry {
 
   let result = gear;
   if (hub > 0) {
-    // Boss around the bore, as tall as the gear, protruding above the top face.
+    // Boss around the bore, protruding `hubHeight` mm above the top face
+    // (independent of gear thickness; defaults to thickness for continuity).
     // Built as its own closed shell and merged with the gear (each watertight,
     // overlapping) — no 3D boolean needed. The bore (incl. any flat) runs
     // through the boss too.
-    const embed = Math.min(params.thickness * 0.25, 0.5);
-    const boss = extrudeWithHole(circleProfile(hub / 2), hole, params.thickness);
+    const hubHeight = params.hubHeight ?? params.thickness;
+    const embed = Math.min(params.thickness * 0.25, 0.5); // buried in the gear for a clean overlap
+    const boss = extrudeWithHole(circleProfile(hub / 2), hole, hubHeight + embed);
     boss.translate(0, 0, params.thickness - embed);
     result = mergeGeometries([gear, boss], false);
   }
@@ -170,6 +177,7 @@ export function gearParamsFromPreset(rec: Record<string, unknown>): GearParams {
     boreShape: (rec.boreShape as BoreShape) ?? "round",
     flatDepth: rec.flatDepth as number | undefined,
     hubDiameter: (rec.hubDiameter as number) ?? 0,
+    hubHeight: rec.hubHeight as number | undefined,
     thickness: rec.thickness as number,
     backlash: (rec.backlash as number) ?? 0,
   };

@@ -5,16 +5,21 @@
  * true relative size, to confirm they mesh regardless of tooth count.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { rootRadius, outerRadius, DEFAULT_PRESSURE_ANGLE, MIN_TEETH } from "./common.js";
-import { generateInvoluteGear, GearParams, GearValidationError, BoreShape } from "./gears.js";
+import { generateInvoluteGear, gearParamsFromPreset, GearParams, GearValidationError, BoreShape } from "./gears.js";
 import { generateShaft, ShaftError } from "./shaft.js";
 import { downloadStl } from "./stl.js";
 import GearPreview from "./GearPreview.js";
 import MeshPreview from "./MeshPreview.js";
+import presetM1 from "./presets/m1-20t-5mm.json";
+import presetM15Hub from "./presets/m1.5-30t-6mm-hub.json";
+import presetM2 from "./presets/m2-12t-8mm.json";
 
 type Mode = "single" | "pair";
+
+const PRESETS: Record<string, unknown>[] = [presetM1, presetM15Hub, presetM2];
 
 export default function App() {
   const [mode, setMode] = useState<Mode>("single");
@@ -26,6 +31,7 @@ export default function App() {
   const [boreShape, setBoreShape] = useState<BoreShape>("round");
   const [flatDepth, setFlatDepth] = useState(1.5);
   const [hub, setHub] = useState(0);
+  const [hubHeight, setHubHeight] = useState(6);
   const [thickness, setThickness] = useState(6);
   const [backlash, setBacklash] = useState(0.1);
   const [shaftLength, setShaftLength] = useState(30);
@@ -48,9 +54,16 @@ export default function App() {
     if (backlash > maxBacklash) setBacklash(maxBacklash);
   }, [maxBore, maxHub, maxFlat, maxBacklash]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // seed hub height from the current thickness the moment the hub is turned on
+  const wasHub = useRef(false);
+  useEffect(() => {
+    if (hub > 0 && !wasHub.current) setHubHeight(thickness);
+    wasHub.current = hub > 0;
+  }, [hub]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const params: GearParams = {
     module, teeth, pressureAngle, boreDiameter: bore, boreShape, flatDepth,
-    hubDiameter: mode === "single" ? hub : 0, thickness, backlash,
+    hubDiameter: mode === "single" ? hub : 0, hubHeight, thickness, backlash,
   };
 
   // gear A
@@ -62,7 +75,7 @@ export default function App() {
       setGeometry(null);
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [module, teeth, pressureAngle, bore, boreShape, flatDepth, hub, thickness, backlash, mode]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [module, teeth, pressureAngle, bore, boreShape, flatDepth, hub, hubHeight, thickness, backlash, mode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // gear B (pair mode) — shares module / pressure angle / thickness / bore shape / backlash
   useEffect(() => {
@@ -98,6 +111,23 @@ export default function App() {
     } catch (e) {
       setError(e instanceof ShaftError ? e.message : String(e));
     }
+  };
+
+  const applyPreset = (rec: Record<string, unknown>) => {
+    const p = gearParamsFromPreset(rec);
+    setModule(p.module);
+    setTeeth(p.teeth);
+    setPressureAngle(p.pressureAngle ?? DEFAULT_PRESSURE_ANGLE);
+    setBore(p.boreDiameter ?? 0);
+    setBoreShape(p.boreShape ?? "round");
+    setFlatDepth(p.flatDepth ?? 1.5);
+    setHub(p.hubDiameter ?? 0);
+    setHubHeight(p.hubHeight ?? p.thickness);
+    setThickness(p.thickness);
+    setBacklash(p.backlash ?? 0);
+    setMode("single");
+    setStatus(`Loaded preset: ${rec.name as string}`);
+    setError("");
   };
 
   const centreDist = ((module * (teeth + teethB)) / 2).toFixed(1);
@@ -143,6 +173,23 @@ export default function App() {
                 {m === "single" ? "Single gear" : "Meshing pair"}
               </button>
             ))}
+          </div>
+
+          <div className="field">
+            <div className="field-head"><span>Presets</span></div>
+            <select
+              value=""
+              onChange={(e) => {
+                const i = Number(e.target.value);
+                if (PRESETS[i]) applyPreset(PRESETS[i]);
+              }}
+            >
+              <option value="" disabled>Load a preset…</option>
+              {PRESETS.map((p, i) => (
+                <option key={i} value={i}>{p.name as string}</option>
+              ))}
+            </select>
+            <small>fills in every field below at once; tweak freely after</small>
           </div>
 
           <div className="field">
@@ -214,7 +261,16 @@ export default function App() {
               <div className="field-head"><span>Hub diameter</span><span className="val">{hub === 0 ? "none" : `${hub.toFixed(1)} mm`}</span></div>
               <input type="range" min={0} max={maxHub} step={0.5} value={hub}
                 onChange={(e) => { const v = Number(e.target.value); setHub(v <= bore ? 0 : v); }} />
-              <small>0 = none; a boss around the bore, as tall as the gear</small>
+              <small>0 = none; a boss around the bore</small>
+            </div>
+          )}
+
+          {mode === "single" && hub > 0 && (
+            <div className="field">
+              <div className="field-head"><span>Hub height</span><span className="val">{hubHeight.toFixed(1)} mm</span></div>
+              <input type="range" min={0.5} max={40} step={0.5} value={hubHeight}
+                onChange={(e) => setHubHeight(Number(e.target.value))} />
+              <small>how far the hub protrudes above the gear face</small>
             </div>
           )}
 

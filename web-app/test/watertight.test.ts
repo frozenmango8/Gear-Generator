@@ -69,12 +69,26 @@ for (const module of modules) {
 console.log("\n=== Hub option: watertight + adds material above the gear ===");
 for (const [module, teeth] of [[1, 20], [2, 16], [1.5, 30]] as const) {
   const bore = 4;
-  const plain = generateInvoluteGear({ module, teeth, boreDiameter: bore, thickness: 4 });
-  const hubbed = generateInvoluteGear({ module, teeth, boreDiameter: bore, hubDiameter: bore + 6, thickness: 4 });
+  const thickness = 4;
+  const plain = generateInvoluteGear({ module, teeth, boreDiameter: bore, thickness });
+  // default hubHeight (omitted) should fall back to thickness -> top = thickness + thickness
+  const hubbed = generateInvoluteGear({ module, teeth, boreDiameter: bore, hubDiameter: bore + 6, thickness });
   hubbed.computeBoundingBox();
   const zTop = hubbed.boundingBox!.max.z;
-  const grew = volume(hubbed) > volume(plain) && zTop > 4 + 0.5; // taller than the 4mm gear
-  ok(isWatertight(hubbed) && grew, `m=${module} ${teeth}t + hub: watertight=${isWatertight(hubbed)} topZ=${zTop.toFixed(1)}mm (>4)`);
+  const wantTop = thickness + thickness;
+  const grew = volume(hubbed) > volume(plain) && Math.abs(zTop - wantTop) < 0.6; // embed tolerance
+  ok(isWatertight(hubbed) && grew, `m=${module} ${teeth}t + hub (default height): watertight=${isWatertight(hubbed)} topZ=${zTop.toFixed(1)}mm (want ~${wantTop})`);
+}
+
+console.log("\n=== Hub height: independent of thickness, exact value ===");
+for (const [module, teeth, thickness, hubHeight] of [[2, 20, 4, 12], [1, 24, 6, 2], [1.5, 16, 8, 25]] as const) {
+  const bore = 4;
+  const g = generateInvoluteGear({ module, teeth, boreDiameter: bore, hubDiameter: bore + 6, hubHeight, thickness });
+  g.computeBoundingBox();
+  const zTop = g.boundingBox!.max.z;
+  const wantTop = thickness + hubHeight;
+  const ok1 = Math.abs(zTop - wantTop) < 0.6 && isWatertight(g);
+  ok(ok1, `m=${module} ${teeth}t thickness=${thickness} hubHeight=${hubHeight}: topZ=${zTop.toFixed(1)} (want ~${wantTop}) watertight=${isWatertight(g)}`);
 }
 
 console.log("\n=== D-flat bore: watertight + flat present + runs through hub ===");
@@ -138,6 +152,10 @@ mustThrow(
 mustThrow(
   () => generateInvoluteGear({ module: 1, teeth: 20, boreDiameter: 5, hubDiameter: 3, thickness: 4 }),
   "hub <= bore",
+);
+mustThrow(
+  () => generateInvoluteGear({ module: 1, teeth: 20, boreDiameter: 4, hubDiameter: 10, hubHeight: 0, thickness: 4 }),
+  "hubHeight 0",
 );
 mustThrow(
   () => generateInvoluteGear({ module: 2, teeth: 20, boreDiameter: 6, boreShape: "d_flat", flatDepth: 0, thickness: 4 }),

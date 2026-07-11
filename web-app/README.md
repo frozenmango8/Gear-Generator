@@ -28,6 +28,7 @@ npm test               # watertightness + dimensional matrix
 | `boreShape`     | `"round"` (default) or `"d_flat"` (D-shaft flat)  |
 | `flatDepth`     | mm the flat removes, for `boreShape: "d_flat"`    |
 | `hubDiameter`   | 0 = none, or > bore (a boss around the bore)      |
+| `hubHeight`     | mm the hub protrudes above the top face (default: `thickness`) |
 | `thickness`     | mm                                                |
 | `backlash`      | mm tooth-thinning so a printed pair turns free (0 = exact) |
 
@@ -40,11 +41,10 @@ root). Invalid input throws a typed `GearValidationError`.
 - **Gear + bore:** the toothed involute outline is a `THREE.Shape`, the round
   bore is a hole on that shape, and it's extruded to `thickness` — a single
   watertight manifold, no 3D boolean.
-- **Optional hub:** a boss around the bore, **as tall as the gear** and
-  protruding one gear-thickness above the top face. It's built as its own
-  closed shell and merged with the gear (each watertight, overlapping) — so
-  the hub needs no CSG either. (Hub height is currently fixed at one gear
-  thickness; easy to expose as a parameter.)
+- **Optional hub:** a boss around the bore, protruding `hubHeight` mm above the
+  top face (independent of gear thickness; defaults to `thickness` if omitted,
+  for continuity). Built as its own closed shell and merged with the gear
+  (each watertight, overlapping) — so the hub needs no CSG either.
 
 - **Matching shaft (`generateShaft`):** a separate download — a round or
   D-flat pole sized to the current bore minus a printing `clearance` (default
@@ -66,6 +66,15 @@ disabled). The gear auto-spins in-plane until you interact with it (single
 preview) or spins continuously as the meshing demo (pair preview) — either
 way, orbiting works at any time.
 
+## Presets
+
+Three JSON presets under `src/presets/` (module/teeth/bore/hub combos you
+can't get from the old LEGO-locked tool) are wired into a **Presets** dropdown
+in the GUI — selecting one fills in every field at once via
+`gearParamsFromPreset()`; you can keep tweaking from there. The dropdown
+resets to a placeholder after each pick so it always reads as an action, not a
+stuck selection.
+
 ## Verification (`npm test`)
 
 Swept across the general parameter space, not fixed sizes:
@@ -73,9 +82,13 @@ Swept across the general parameter space, not fixed sizes:
 - **module** ∈ {0.5, 1, 1.5, 2, 3, 5} × **teeth** ∈ {6, 8, 12, 17, 20, 40} ×
   **pressure angle** ∈ {14.5°, 20°} — every combination watertight, with the
   correct tip diameter and `pitch diameter = module × teeth`.
-- **Hub** cases watertight and taller than the gear body.
+- **Hub** watertight, taller than the gear body at the default height, and —
+  separately — **hub height** verified to land exactly at `thickness +
+  hubHeight` regardless of thickness, so the two are genuinely independent.
 - **Validation** errors thrown for teeth < 6, module 0, thickness 0, bore into
-  root, and hub ≤ bore.
+  root, hub ≤ bore, and hub height ≤ 0.
 
-Also smoke-tested in headless Chromium: the form renders, all five sliders and
-the pressure-angle toggle drive the live 3D preview.
+Also smoke-tested in headless Chromium: the form renders, presets load and
+populate every field (confirmed against the computed pitch diameter), the hub
+height slider appears/disappears with the hub, and no console errors are
+thrown while driving the controls.

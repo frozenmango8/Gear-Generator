@@ -74,35 +74,36 @@ export function hasUndercut(
 // --------------------------------------------------------------------------- //
 
 /**
- * Ordered points of the full involute gear outline.
+ * Points of a SINGLE involute tooth, centred on angle 0 (up-flank, down-flank,
+ * then a short root arc reaching the angular midpoint before the next tooth
+ * would start). `shapeTeeth` drives the involute curvature (angular width,
+ * base/root/tip radii) and need not be an integer — bevel gears evaluate this
+ * at a "virtual" (Tredgold) tooth count distinct from the real, integer tooth
+ * count the gear actually has. Spur gears call this with shapeTeeth == the
+ * real tooth count, which is exactly the original single-outline behaviour.
  *
- * `backlash` (mm) thins each tooth's circular thickness at the pitch line by
- * that amount (each flank pulled in by backlash/2), widening the gap so a
- * printed pair meshes with clearance at the standard centre distance instead
- * of binding. 0 = mathematically exact teeth.
- *
- * `profileShift` (x, standard addendum-modification coefficient) thickens
- * the tooth base and pushes the tip out — the fix for undercut on low tooth
- * counts. See `minProfileShift()` for the value that just eliminates it.
+ * `backlash` / `profileShift` have the same meaning as `involuteGearOutline`.
+ * Also returns the resolved `rRoot`/`rOut` (post pointed-tip clamp) since
+ * callers (bevel tooth scaling) need those radii too.
  */
-export function involuteGearOutline(
-  teeth: number,
+export function singleToothOutline(
+  shapeTeeth: number,
   module: number,
   pressureAngleDeg: number = DEFAULT_PRESSURE_ANGLE,
   steps = 8,
   backlash = 0,
   profileShift = 0,
-): THREE.Vector2[] {
+): { points: THREE.Vector2[]; rRoot: number; rOut: number; toothStep: number } {
   const pa = THREE.MathUtils.degToRad(pressureAngleDeg);
-  const rPitch = pitchRadius(teeth, module);
+  const rPitch = pitchRadius(shapeTeeth, module);
   const rBase = rPitch * Math.cos(pa);
-  const rRoot = rootRadius(teeth, module, profileShift);
+  const rRoot = rootRadius(shapeTeeth, module, profileShift);
 
   const invPa = Math.tan(pa) - pa;
   // pull each flank in by the angular equivalent of backlash/2 at the pitch circle,
-  // and out again by the profile-shift's extra rack travel (2*x*tan(pa)/teeth)
+  // and out again by the profile-shift's extra rack travel (2*x*tan(pa)/shapeTeeth)
   const dTheta = backlash / 2 / rPitch;
-  const halfTooth = Math.PI / (2 * teeth) - dTheta + (2 * profileShift * Math.tan(pa)) / teeth;
+  const halfTooth = Math.PI / (2 * shapeTeeth) - dTheta + (2 * profileShift * Math.tan(pa)) / shapeTeeth;
 
   const flank = (r: number): number => {
     const rr = Math.max(r, rBase);
@@ -118,7 +119,7 @@ export function involuteGearOutline(
   // the tip radius so the topland keeps a minimum sliver of width instead of
   // closing to (or past) a point.
   const minTopHalfAngle = 0.01; // rad (~0.6deg) — a thin but real, non-crossing tip
-  let rOut = outerRadius(teeth, module, profileShift);
+  let rOut = outerRadius(shapeTeeth, module, profileShift);
   if (flank(rOut) < minTopHalfAngle) {
     let lo = rBase, hi = rOut;
     for (let i = 0; i < 40; i++) {
@@ -131,27 +132,64 @@ export function involuteGearOutline(
   const rStart = Math.min(rRoot, rBase);
   const radii: number[] = [];
   for (let i = 0; i <= steps; i++) radii.push(rStart + ((rOut - rStart) * i) / steps);
-  const toothStep = (2 * Math.PI) / teeth;
+  const toothStep = (2 * Math.PI) / shapeTeeth;
 
-  const pts: THREE.Vector2[] = [];
-  for (let k = 0; k < teeth; k++) {
-    const c = k * toothStep;
-    for (const r of radii) {
-      const th = c - flank(r);
-      pts.push(new THREE.Vector2(r * Math.cos(th), r * Math.sin(th)));
-    }
-    for (let i = radii.length - 1; i >= 0; i--) {
-      const r = radii[i];
-      const th = c + flank(r);
-      pts.push(new THREE.Vector2(r * Math.cos(th), r * Math.sin(th)));
-    }
-    const thLeft = c + flank(rStart);
-    const thNext = c + toothStep - flank(rStart);
-    for (let i = 1; i < 4; i++) {
-      const th = thLeft + ((thNext - thLeft) * i) / 4;
-      pts.push(new THREE.Vector2(rRoot * Math.cos(th), rRoot * Math.sin(th)));
-    }
+  const points: THREE.Vector2[] = [];
+  for (const r of radii) {
+    const th = -flank(r);
+    points.push(new THREE.Vector2(r * Math.cos(th), r * Math.sin(th)));
   }
+  for (let i = radii.length - 1; i >= 0; i--) {
+    const r = radii[i];
+    const th = flank(r);
+    points.push(new THREE.Vector2(r * Math.cos(th), r * Math.sin(th)));
+  }
+  // The root arc is drawn at rStart, NOT the raw rRoot formula value. When
+  // rRoot > rBase (routine once teeth get large enough relative to module —
+  // ~42 teeth at module 1, 20°; Tredgold's virtual tooth count for a steep
+  // bevel ratio reaches it far more easily), rStart = rBase, but the flank
+  // curve's innermost SAMPLED point is also at rStart. Drawing the root arc
+  // at the larger rRoot instead would jump radially outward right at that
+  // transition — usually a harmless little shoulder, but confirmed to
+  // self-intersect the polygon when combined with a pointed-tip clamp that
+  // pulls rOut down close to rRoot (found via an extreme bevel virtual-tooth
+  // case: 40t meshing with 8t). Using rStart keeps the boundary continuous
+  // for every parameter combination, not just the ones already tested.
+  const thLeft = flank(rStart);
+  const thNext = toothStep - flank(rStart);
+  for (let i = 1; i < 4; i++) {
+    const th = thLeft + ((thNext - thLeft) * i) / 4;
+    points.push(new THREE.Vector2(rStart * Math.cos(th), rStart * Math.sin(th)));
+  }
+  // rStart is also the geometrically TRUE (effective) root of the drawn
+  // shape once this clamp is in play, so return it (not the raw rRoot) —
+  // callers using this for bore-safety limits (bevelMaxBoreDiameter) must
+  // check against what's actually drawn, not a fictional larger value.
+  return { points, rRoot: rStart, rOut, toothStep };
+}
+
+/** Rotate a point loop by `angle` radians about the origin. */
+export function rotatePoints(points: THREE.Vector2[], angle: number): THREE.Vector2[] {
+  const cos = Math.cos(angle), sin = Math.sin(angle);
+  return points.map((p) => new THREE.Vector2(p.x * cos - p.y * sin, p.x * sin + p.y * cos));
+}
+
+/**
+ * Ordered points of the full involute gear outline: `teeth` real, evenly-
+ * spaced copies of `singleToothOutline(teeth, ...)`. See that function for
+ * what `backlash` / `profileShift` do.
+ */
+export function involuteGearOutline(
+  teeth: number,
+  module: number,
+  pressureAngleDeg: number = DEFAULT_PRESSURE_ANGLE,
+  steps = 8,
+  backlash = 0,
+  profileShift = 0,
+): THREE.Vector2[] {
+  const { points: tooth, toothStep } = singleToothOutline(teeth, module, pressureAngleDeg, steps, backlash, profileShift);
+  const pts: THREE.Vector2[] = [];
+  for (let k = 0; k < teeth; k++) pts.push(...rotatePoints(tooth, k * toothStep));
   return pts;
 }
 

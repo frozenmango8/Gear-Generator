@@ -1,8 +1,9 @@
 # Involute Spur Gear Generator — browser
 
-A client-side parametric involute **spur gear** generator. Runs entirely in the
-browser (no server), deploys as a static site, and downloads watertight binary
-`.stl` files via a browser Blob.
+A client-side parametric involute **spur gear** generator, plus a **straight
+bevel gear** mode for shafts that meet at 90°. Runs entirely in the browser
+(no server), deploys as a static site, and downloads watertight binary `.stl`
+files via a browser Blob.
 
 Formerly a LEGO-specific tool; now general-purpose — module and pressure angle
 are free inputs and the bore is a plain round hole.
@@ -113,6 +114,82 @@ The reported `outerRadius()` stays the nominal formula value; the actual tip
 can be smaller once this clamp engages, which is why validated undercut-fix
 cases check the tip is `<=` nominal rather than asserting an exact match.
 
+## Bevel gears (90° shafts) — `generateBevelGear(params)`
+
+**Bevel pair (90°)** mode generates two **straight bevel gears** whose shafts
+meet at a right angle, via **Tredgold's approximation** — the standard
+technique for 3D-printable straight bevel teeth (used by most OpenSCAD/CAD
+bevel generators too).
+
+| Param          | Notes                                                        |
+|----------------|---------------------------------------------------------------|
+| `teeth`        | this gear's real, integer tooth count (≥ 6)                   |
+| `matingTeeth`  | the mate's tooth count — together they set both pitch angles (`atan2(teeth, matingTeeth)` and its complement, always summing to 90°) |
+| `module`       | shared by both gears, same convention as the spur module      |
+| `faceWidth`    | axial depth of the tooth band, out from the shared cone apex (default: outer cone distance / 3) |
+| `pressureAngle`, `boreDiameter`, `boreShape`, `flatDepth`, `backlash` | same meaning as the spur generator |
+
+**How the tooth shape is built:** each gear's tooth profile is computed as an
+equivalent spur-gear tooth at a *virtual* (back-cone) tooth count
+`teeth / cos(gamma)` — a standard substitution that gives the flank the
+correct involute curvature for a cone instead of a cylinder — then mapped onto
+the gear's real physical size and its real, integer tooth count. The tapered
+3D tooth is a straight loft between that cross-section at the outer (large)
+end and a uniformly-scaled copy at the inner end, `faceWidth` further in along
+the axis — the standard simplification for **straight** (non-spiral) bevel
+teeth, whose flanks are straight lines from the cone apex.
+
+**Scope, stated plainly:** 90° shaft angle only (no arbitrary bevel angle),
+straight teeth (no spiral/hypoid), no hub, and no profile shift (a meshing
+pair's shift would need to balance against a changed operating pressure angle
+— the same reason it's out of scope for the parallel-shaft *meshing pair*
+mode too). The 3D preview (`BevelPreview`) is a **static assembly**, not a
+meshing simulation — true bevel-tooth contact kinematics vary along the cone
+and are a materially harder problem than the parallel-shaft counter-rotation
+case, so rather than fake it, the pair auto-spins as one rigid body when idle
+(presentation only) and stops the moment you orbit/pan/zoom it yourself.
+
+**Two real bugs found and fixed while building this** (both caught by
+rendering the actual mesh, not just checking the numbers — `isWatertight()`
+and a positive `signedVolume()` both kept passing while these were present):
+
+- **Angular mapping.** The virtual tooth's own angular width
+  (`2π / zVirtual`) doesn't match the real gear's tooth spacing
+  (`2π / teeth`) — they differ by exactly `cos(gamma)`. Naively scaling each
+  point's *radius* by `cos(gamma)` while leaving its *angle* unchanged (as an
+  earlier version of this code did) replicates a tooth cell that's narrower
+  than the slot it's placed in, tearing gaps into the outline between teeth.
+  Fixed by also scaling each point's angle by `1 / cos(gamma)` — the same
+  "developed cone" substitution that motivates using a virtual tooth count in
+  the first place, applied consistently to the whole flank rather than just
+  its radius.
+- **Triangle winding.** The hand-built loft (side walls + end caps — this
+  shape isn't a constant cross-section, so `THREE.ExtrudeGeometry` doesn't
+  apply) had the *bore* wall's triangles wound backwards relative to the rest
+  of the mesh. `isWatertight()` (every edge shared by exactly two triangles)
+  and a net-positive `signedVolume()` both stayed green through this, because
+  neither check is sensitive to a *local* winding flip — the backwards patch
+  just partially cancelled the volume integral without flipping its sign.
+  It only showed up as backface-culling holes in the WebGL preview from
+  certain angles (readable as thin "spikes" through the gap to geometry
+  behind it) and would have handed a slicer a non-manifold-normals STL.
+  Found by checking that every directed edge (`a→b` within a triangle) has
+  exactly one opposite-direction partner (`b→a`) on the neighboring triangle
+  — a stricter test than either check above — now a permanent part of the
+  bevel test suite (`isConsistentlyWound()`).
+
+The same debugging also surfaced a latent, pre-existing issue in the shared
+single-tooth outline code (`singleToothOutline` in `common.ts`): the root arc
+was drawn at the raw `rootRadius()` formula value instead of
+`min(rootRadius(), baseRadius())`, which is where the flank curve's own
+innermost point actually lands. Once `rootRadius() > baseRadius()` — routine
+for a bevel gear's large virtual tooth count, and in principle possible for
+an ordinary spur gear around 42+ teeth at module 1, 20° — this created a
+discontinuity that could self-intersect the outline when combined with the
+pointed-tip clamp. Fixed for both spur and bevel gears by the same one-line
+change; the full spur-gear regression matrix (module × teeth × pressure angle)
+still passes unchanged.
+
 ## Presets
 
 Three JSON presets under `src/presets/` (module/teeth/bore/hub combos you
@@ -142,6 +219,15 @@ Swept across the general parameter space, not fixed sizes:
   Separately, the **actual undercut-fix path** (recommended shift on 6/8/12
   tooth gears, including the pointed-tip clamp) is verified watertight, no
   longer undercutting, with the tip at-or-under the nominal outer radius.
+
+- **Bevel gears:** pitch angles sum to 90° and both gears share the same
+  outer cone distance, across several teeth-ratio/module combinations;
+  watertight + correctly-wound (positive `signedVolume()` *and*
+  `isConsistentlyWound()`, see above) across a teeth-ratio × module × bore
+  sweep, including the extreme ratio (40t meshing with 8t) that originally
+  exposed the angular-mapping bug; bore validation matching
+  `bevelMaxBoreDiameter()` exactly at the boundary; and the full set of
+  validation errors (teeth/module/face-width/bore/flat-depth).
 
 Also smoke-tested in headless Chromium: the form renders, presets load and
 populate every field (confirmed against the computed pitch diameter), the hub

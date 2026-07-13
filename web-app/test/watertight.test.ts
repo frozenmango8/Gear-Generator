@@ -7,7 +7,8 @@
 import * as THREE from "three";
 import { generateInvoluteGear, GearValidationError, BoreShape } from "../src/gears.js";
 import { generateShaft, ShaftError } from "../src/shaft.js";
-import { isWatertight, outerRadius, rootRadius, pitchRadius, involuteGearOutline, minProfileShift, hasUndercut } from "../src/common.js";
+import { generateBevelGear, bevelPitchAngle, bevelOuterConeDistance, bevelMaxBoreDiameter, BevelGearValidationError } from "../src/bevel.js";
+import { isWatertight, outerRadius, rootRadius, pitchRadius, involuteGearOutline, minProfileShift, hasUndercut, weld } from "../src/common.js";
 
 let failures = 0;
 const ok = (cond: boolean, msg: string) => {
@@ -15,7 +16,7 @@ const ok = (cond: boolean, msg: string) => {
   if (!cond) failures++;
 };
 
-function volume(geo: THREE.BufferGeometry): number {
+function signedVolume(geo: THREE.BufferGeometry): number {
   const g = geo.index ? geo.toNonIndexed() : geo;
   const p = g.getAttribute("position");
   let v = 0;
@@ -25,7 +26,35 @@ function volume(geo: THREE.BufferGeometry): number {
     const cx = p.getX(i + 2), cy = p.getY(i + 2), cz = p.getZ(i + 2);
     v += (ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx)) / 6;
   }
-  return Math.abs(v);
+  return v;
+}
+function volume(geo: THREE.BufferGeometry): number {
+  return Math.abs(signedVolume(geo));
+}
+/** A properly oriented closed mesh has every directed edge (a->b within a
+ *  triangle) matched by exactly one opposite-direction partner (b->a) on the
+ *  neighboring triangle. A net-positive signedVolume() can still hide LOCAL
+ *  winding flips if a locally-reversed patch's area is small relative to the
+ *  whole shape (that's exactly how a backwards-wound tooth wall previously
+ *  slipped through: aggregate volume stayed positive while individual faces
+ *  disagreed with their neighbors, showing up as backface-culling holes in
+ *  the WebGL preview from oblique angles even though the STL numbers looked
+ *  fine) — so isWatertight()+signedVolume()>0 alone aren't sufficient. */
+function isConsistentlyWound(geo: THREE.BufferGeometry): boolean {
+  const g = geo.index ? geo : weld(geo);
+  const index = g.getIndex();
+  if (!index) return false;
+  const arr = index.array;
+  const dirCount = new Map<string, number>();
+  for (let i = 0; i < arr.length; i += 3) {
+    const a = arr[i], b = arr[i + 1], c = arr[i + 2];
+    for (const [u, v] of [[a, b], [b, c], [c, a]] as const) {
+      const key = `${u}_${v}`;
+      dirCount.set(key, (dirCount.get(key) ?? 0) + 1);
+    }
+  }
+  for (const [, count] of dirCount) if (count > 1) return false;
+  return true;
 }
 /** True tip diameter = 2x the largest vertex radius (a tooth tip rarely lands
  *  exactly on an axis, so a bounding-box width underreports it). */
@@ -189,6 +218,66 @@ for (const [boreDiameter, shape, flat] of [[6, "round", 0], [6, "d_flat", 1.5], 
   ok(wt && fits && Math.abs(len - 25) < 0.01,
     `bore=${boreDiameter} ${shape}: watertight=${wt} shaftR=${shaftR.toFixed(2)}(<= ${(boreDiameter / 2 - clr).toFixed(2)}) len=${len.toFixed(1)}`);
 }
+
+console.log("\n=== Bevel pair (90°): shared apex identities (pitch angles sum to 90, Ro matches) ===");
+for (const [zA, zB, module] of [[20, 12, 2], [16, 16, 1.5], [8, 40, 1]] as const) {
+  const gammaA = bevelPitchAngle(zA, zB);
+  const gammaB = bevelPitchAngle(zB, zA);
+  const sumOk = Math.abs(THREE.MathUtils.radToDeg(gammaA + gammaB) - 90) < 1e-9;
+  const RoA = bevelOuterConeDistance(zA, zB, module);
+  const RoB = bevelOuterConeDistance(zB, zA, module);
+  const roOk = Math.abs(RoA - RoB) < 1e-9;
+  ok(sumOk && roOk,
+    `zA=${zA} zB=${zB}: gammaA+gammaB=${THREE.MathUtils.radToDeg(gammaA + gammaB).toFixed(4)}deg (want 90) RoA=${RoA.toFixed(3)} RoB=${RoB.toFixed(3)}`);
+}
+
+console.log("\n=== Bevel gear: watertight, correctly-wound (positive volume), across teeth ratio x module x bore ===");
+for (const [teeth, mate, module, bore, shape] of [
+  [20, 12, 2, 4, "round"], [12, 20, 2, 3, "d_flat"], [16, 16, 1.5, 3, "round"],
+  [8, 40, 1, 1.5, "round"], [40, 8, 1, 2, "d_flat"], [10, 10, 2.5, 0, "round"],
+] as const) {
+  const g = generateBevelGear({
+    teeth, matingTeeth: mate, module, boreDiameter: bore, boreShape: shape as BoreShape,
+    flatDepth: shape === "d_flat" ? Math.max(0.5, bore * 0.3) : undefined,
+  });
+  const wt = isWatertight(g);
+  const vol = signedVolume(g);
+  const consistent = isConsistentlyWound(g);
+  ok(wt && vol > 0 && consistent,
+    `${teeth}t/mate=${mate}t m=${module} bore=${bore} ${shape}: watertight=${wt} signedVolume=${vol.toFixed(2)} consistentlyWound=${consistent} (want > 0 volume, locally consistent winding)`);
+}
+
+console.log("\n=== Bevel gear: bore validation matches bevelMaxBoreDiameter() exactly ===");
+for (const [teeth, mate, module] of [[20, 12, 2], [12, 20, 2]] as const) {
+  const max = bevelMaxBoreDiameter(teeth, mate, module);
+  const justUnder = generateBevelGear({ teeth, matingTeeth: mate, module, boreDiameter: max - 0.1 });
+  ok(isWatertight(justUnder), `${teeth}t bore just under max (${(max - 0.1).toFixed(2)}): watertight=${isWatertight(justUnder)}`);
+  try {
+    generateBevelGear({ teeth, matingTeeth: mate, module, boreDiameter: max + 0.1 });
+    ok(false, `${teeth}t bore just over max (${(max + 0.1).toFixed(2)}) -> NO ERROR (bug)`);
+  } catch (e) {
+    ok(e instanceof BevelGearValidationError, `${teeth}t bore just over max -> ${(e as Error).message}`);
+  }
+}
+
+console.log("\n=== Bevel validation errors ===");
+const mustThrowBevel = (fn: () => void, label: string) => {
+  try {
+    fn();
+    ok(false, `${label} -> NO ERROR (bug)`);
+  } catch (e) {
+    ok(e instanceof BevelGearValidationError, `${label} -> ${(e as Error).message}`);
+  }
+};
+mustThrowBevel(() => generateBevelGear({ teeth: 5, matingTeeth: 20, module: 2 }), "teeth < 6");
+mustThrowBevel(() => generateBevelGear({ teeth: 20, matingTeeth: 5, module: 2 }), "matingTeeth < 6");
+mustThrowBevel(() => generateBevelGear({ teeth: 20, matingTeeth: 12, module: 0 }), "module 0");
+mustThrowBevel(() => generateBevelGear({ teeth: 20, matingTeeth: 12, module: 2, faceWidth: 1000 }), "faceWidth >= Ro");
+mustThrowBevel(() => generateBevelGear({ teeth: 20, matingTeeth: 12, module: 2, faceWidth: 0 }), "faceWidth 0");
+mustThrowBevel(
+  () => generateBevelGear({ teeth: 20, matingTeeth: 12, module: 2, boreDiameter: 6, boreShape: "d_flat", flatDepth: 0 }),
+  "d_flat flatDepth 0",
+);
 
 console.log("\n=== Validation errors ===");
 const mustThrow = (fn: () => void, label: string) => {

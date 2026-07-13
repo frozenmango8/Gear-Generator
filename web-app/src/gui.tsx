@@ -10,14 +10,16 @@ import * as THREE from "three";
 import { rootRadius, outerRadius, minProfileShift, hasUndercut, DEFAULT_PRESSURE_ANGLE, MIN_TEETH, MAX_PROFILE_SHIFT } from "./common.js";
 import { generateInvoluteGear, gearParamsFromPreset, GearParams, GearValidationError, BoreShape } from "./gears.js";
 import { generateShaft, ShaftError } from "./shaft.js";
+import { generateBevelGear, bevelPitchAngle, bevelOuterConeDistance, bevelMaxBoreDiameter, BevelGearValidationError } from "./bevel.js";
 import { downloadStl } from "./stl.js";
 import GearPreview from "./GearPreview.js";
 import MeshPreview from "./MeshPreview.js";
+import BevelPreview from "./BevelPreview.js";
 import presetM1 from "./presets/m1-20t-5mm.json";
 import presetM15Hub from "./presets/m1.5-30t-6mm-hub.json";
 import presetM2 from "./presets/m2-12t-8mm.json";
 
-type Mode = "single" | "pair";
+type Mode = "single" | "pair" | "bevel";
 
 const PRESETS: Record<string, unknown>[] = [presetM1, presetM15Hub, presetM2];
 
@@ -38,11 +40,14 @@ export default function App() {
   const [shaftLength, setShaftLength] = useState(30);
   const [shaftClearance, setShaftClearance] = useState(0.2);
   const [showShaftInPreview, setShowShaftInPreview] = useState(true);
+  const [faceWidth, setFaceWidth] = useState(5);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null);
   const [geometryB, setGeometryB] = useState<THREE.BufferGeometry | null>(null);
   const [shaftPreview, setShaftPreview] = useState<THREE.BufferGeometry | null>(null);
+  const [bevelGeomA, setBevelGeomA] = useState<THREE.BufferGeometry | null>(null);
+  const [bevelGeomB, setBevelGeomB] = useState<THREE.BufferGeometry | null>(null);
 
   // dynamic limits so sliders can't cross into invalid geometry
   const maxBore = Math.max(0, +(2 * rootRadius(teeth, module, profileShift) - 0.2).toFixed(1));
@@ -52,12 +57,25 @@ export default function App() {
   const recommendedShift = +minProfileShift(teeth, pressureAngle).toFixed(2);
   const undercut = hasUndercut(teeth, pressureAngle, profileShift);
 
+  // bevel-pair geometry (90° shaft angle): pitch angles, shared outer cone
+  // distance, and a face-width bound (must stay under Ro so the small/toe
+  // end keeps a positive radius)
+  const bevelRo = bevelOuterConeDistance(teeth, teethB, module);
+  const gammaA = bevelPitchAngle(teeth, teethB);
+  const gammaB = bevelPitchAngle(teethB, teeth);
+  const maxFaceWidth = +(bevelRo * 0.85).toFixed(1);
+  const maxBevelBore = Math.min(
+    bevelMaxBoreDiameter(teeth, teethB, module, pressureAngle, faceWidth, backlash),
+    bevelMaxBoreDiameter(teethB, teeth, module, pressureAngle, faceWidth, backlash),
+  );
+
   useEffect(() => {
     if (bore > maxBore) setBore(maxBore);
     if (hub !== 0 && hub > maxHub) setHub(maxHub);
     if (flatDepth > maxFlat) setFlatDepth(maxFlat);
     if (backlash > maxBacklash) setBacklash(maxBacklash);
-  }, [maxBore, maxHub, maxFlat, maxBacklash]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (faceWidth > maxFaceWidth) setFaceWidth(maxFaceWidth);
+  }, [maxBore, maxHub, maxFlat, maxBacklash, maxFaceWidth]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // seed hub height from the current thickness the moment the hub is turned on
   const wasHub = useRef(false);
@@ -95,6 +113,36 @@ export default function App() {
     }
   }, [mode, module, teethB, pressureAngle, bore, boreShape, flatDepth, thickness, backlash]);
 
+  // bevel pair (90deg shaft angle) — gear A and gear B each need the OTHER's
+  // tooth count to know their own pitch angle, so both calls pass matingTeeth
+  useEffect(() => {
+    if (mode !== "bevel") { setBevelGeomA(null); return; }
+    try {
+      const boreClamped = Math.min(bore, maxBevelBore);
+      setBevelGeomA(generateBevelGear({
+        teeth, matingTeeth: teethB, module, pressureAngle, faceWidth,
+        boreDiameter: boreClamped, boreShape, flatDepth: Math.min(flatDepth, boreClamped * 0.9), backlash,
+      }));
+      setError("");
+    } catch (e) {
+      setBevelGeomA(null);
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [mode, teeth, teethB, module, pressureAngle, faceWidth, bore, boreShape, flatDepth, backlash, maxBevelBore]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (mode !== "bevel") { setBevelGeomB(null); return; }
+    try {
+      const boreClamped = Math.min(bore, maxBevelBore);
+      setBevelGeomB(generateBevelGear({
+        teeth: teethB, matingTeeth: teeth, module, pressureAngle, faceWidth,
+        boreDiameter: boreClamped, boreShape, flatDepth: Math.min(flatDepth, boreClamped * 0.9), backlash,
+      }));
+    } catch {
+      setBevelGeomB(null);
+    }
+  }, [mode, teeth, teethB, module, pressureAngle, faceWidth, bore, boreShape, flatDepth, backlash, maxBevelBore]);
+
   // matching-shaft preview geometry — seated in the bore so the fit is visible
   // before printing, not just trusted from the numbers
   useEffect(() => {
@@ -118,6 +166,18 @@ export default function App() {
       setError("");
     } catch (e) {
       setError(e instanceof GearValidationError ? e.message : String(e));
+    }
+  };
+
+  const downloadBevel = (t: number, mate: number, geo: THREE.BufferGeometry | null) => {
+    if (!geo) return;
+    try {
+      const suffix = bore > 0 && boreShape === "d_flat" ? "_dflat" : "";
+      downloadStl(geo, `bevel_m${module}_${t}t_mate${mate}t${suffix}.stl`);
+      setStatus(`Downloaded ${t}t bevel gear (mates with ${mate}t at 90°, module ${module}).`);
+      setError("");
+    } catch (e) {
+      setError(e instanceof BevelGearValidationError ? e.message : String(e));
     }
   };
 
@@ -168,6 +228,8 @@ export default function App() {
         <section className="panel">
           {mode === "pair" ? (
             <MeshPreview gearA={geometry} gearB={geometryB} teethA={teeth} teethB={teethB} module={module} />
+          ) : mode === "bevel" ? (
+            <BevelPreview gearA={bevelGeomA} gearB={bevelGeomB} teethA={teeth} teethB={teethB} module={module} faceWidth={faceWidth} />
           ) : (
             <GearPreview geometry={geometry} shaft={shaftPreview} />
           )}
@@ -177,6 +239,12 @@ export default function App() {
                 <span>ratio <b>{teeth}:{teethB}</b></span>
                 <span>centres <b>{centreDist}</b> mm apart</span>
                 <span>module <b>{module.toFixed(1)}</b> (shared → they mesh)</span>
+              </>
+            ) : mode === "bevel" ? (
+              <>
+                <span>pitch angles <b>{THREE.MathUtils.radToDeg(gammaA).toFixed(1)}&deg; + {THREE.MathUtils.radToDeg(gammaB).toFixed(1)}&deg;</b> = 90&deg;</span>
+                <span>outer cone dist <b>{bevelRo.toFixed(1)}</b> mm (shared apex)</span>
+                <span>face width <b>{faceWidth.toFixed(1)}</b> mm</span>
               </>
             ) : (
               <>
@@ -191,9 +259,9 @@ export default function App() {
 
         <section className="panel controls">
           <div className="seg" role="group" aria-label="Mode">
-            {(["single", "pair"] as Mode[]).map((m) => (
+            {(["single", "pair", "bevel"] as Mode[]).map((m) => (
               <button key={m} type="button" aria-pressed={mode === m} onClick={() => setMode(m)}>
-                {m === "single" ? "Single gear" : "Meshing pair"}
+                {m === "single" ? "Single gear" : m === "pair" ? "Meshing pair" : "Bevel pair (90°)"}
               </button>
             ))}
           </div>
@@ -219,22 +287,35 @@ export default function App() {
             <div className="field-head"><span>Module</span><span className="val">{module.toFixed(1)} mm</span></div>
             <input type="range" min={0.5} max={5} step={0.1} value={module}
               onChange={(e) => setModule(Number(e.target.value))} />
-            <small>tooth size — {mode === "pair" ? "shared by both gears" : "mm per tooth on the pitch circle"}</small>
+            <small>tooth size — {mode !== "single" ? "shared by both gears" : "mm per tooth on the pitch circle"}</small>
           </div>
 
           <div className="field">
-            <div className="field-head"><span>{mode === "pair" ? "Gear A teeth" : "Teeth"}</span><span className="val">{teeth}</span></div>
+            <div className="field-head"><span>{mode !== "single" ? "Gear A teeth" : "Teeth"}</span><span className="val">{teeth}</span></div>
             <input type="range" min={MIN_TEETH} max={60} step={1} value={teeth}
               onChange={(e) => setTeeth(Number(e.target.value))} />
             <small>any integer ≥ {MIN_TEETH}</small>
           </div>
 
-          {mode === "pair" && (
+          {(mode === "pair" || mode === "bevel") && (
             <div className="field">
               <div className="field-head"><span>Gear B teeth</span><span className="val">{teethB}</span></div>
               <input type="range" min={MIN_TEETH} max={60} step={1} value={teethB}
                 onChange={(e) => setTeethB(Number(e.target.value))} />
-              <small>different count, same module → still meshes</small>
+              <small>
+                {mode === "bevel"
+                  ? "sets both gears' pitch angle (they always sum to 90°)"
+                  : "different count, same module → still meshes"}
+              </small>
+            </div>
+          )}
+
+          {mode === "bevel" && (
+            <div className="field">
+              <div className="field-head"><span>Face width</span><span className="val">{faceWidth.toFixed(1)} mm</span></div>
+              <input type="range" min={1} max={maxFaceWidth} step={0.5} value={Math.min(faceWidth, maxFaceWidth)}
+                onChange={(e) => setFaceWidth(Number(e.target.value))} />
+              <small>axial depth of the tooth band, out from the shared apex</small>
             </div>
           )}
 
@@ -271,7 +352,8 @@ export default function App() {
 
           <div className="field">
             <div className="field-head"><span>Bore diameter</span><span className="val">{bore.toFixed(1)} mm</span></div>
-            <input type="range" min={0} max={maxBore} step={0.5} value={Math.min(bore, maxBore)}
+            <input type="range" min={0} max={mode === "bevel" ? maxBevelBore : maxBore} step={0.5}
+              value={Math.min(bore, mode === "bevel" ? maxBevelBore : maxBore)}
               onChange={(e) => setBore(Number(e.target.value))} />
             <small>hole diameter (0 = solid centre)</small>
           </div>
@@ -318,11 +400,13 @@ export default function App() {
             </div>
           )}
 
-          <div className="field">
-            <div className="field-head"><span>Thickness</span><span className="val">{thickness.toFixed(1)} mm</span></div>
-            <input type="range" min={1} max={20} step={0.5} value={thickness}
-              onChange={(e) => setThickness(Number(e.target.value))} />
-          </div>
+          {mode !== "bevel" && (
+            <div className="field">
+              <div className="field-head"><span>Thickness</span><span className="val">{thickness.toFixed(1)} mm</span></div>
+              <input type="range" min={1} max={20} step={0.5} value={thickness}
+                onChange={(e) => setThickness(Number(e.target.value))} />
+            </div>
+          )}
 
           <div className="field">
             <div className="field-head"><span>Backlash</span><span className="val">{backlash === 0 ? "none" : `${backlash.toFixed(2)} mm`}</span></div>
@@ -364,6 +448,15 @@ export default function App() {
                 Download gear A ({teeth}t)
               </button>
               <button className="primary" onClick={() => download(teethB, geometryB)} disabled={!geometryB}>
+                Download gear B ({teethB}t)
+              </button>
+            </div>
+          ) : mode === "bevel" ? (
+            <div className="btn-row">
+              <button className="primary" onClick={() => downloadBevel(teeth, teethB, bevelGeomA)} disabled={!bevelGeomA}>
+                Download gear A ({teeth}t)
+              </button>
+              <button className="primary" onClick={() => downloadBevel(teethB, teeth, bevelGeomB)} disabled={!bevelGeomB}>
                 Download gear B ({teethB}t)
               </button>
             </div>

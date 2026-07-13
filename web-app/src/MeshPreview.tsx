@@ -9,6 +9,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { outerRadius } from "./common.js";
+import { attachHorizontalWheelPan } from "./orbitPan.js";
 
 interface Props {
   gearA: THREE.BufferGeometry | null;
@@ -73,7 +74,7 @@ export default function MeshPreview({ gearA, gearB, teethA, teethB, module }: Pr
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.1;
-    controls.enablePan = false;
+    controls.enablePan = true; // right-drag pans; also enables real two-finger touch-drag pan
     controls.rotateSpeed = 0.9;
 
     const groupA = new THREE.Group();
@@ -91,6 +92,7 @@ export default function MeshPreview({ gearA, gearB, teethA, teethB, module }: Pr
     };
     ctx.current = c;
     controls.addEventListener("start", () => { c.interacted = true; });
+    const detachWheelPan = attachHorizontalWheelPan(renderer.domElement, camera, controls, () => { c.interacted = true; });
 
     const resize = () => {
       const w = el.clientWidth || 1;
@@ -117,6 +119,7 @@ export default function MeshPreview({ gearA, gearB, teethA, teethB, module }: Pr
     return () => {
       cancelAnimationFrame(c.raf);
       ro.disconnect();
+      detachWheelPan();
       controls.dispose();
       c.meshA?.geometry.dispose();
       c.meshB?.geometry.dispose();

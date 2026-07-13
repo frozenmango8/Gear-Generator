@@ -19,17 +19,54 @@ export const MIN_TEETH = 6;
 
 export const DEFAULT_PRESSURE_ANGLE = 20; // degrees; 14.5 is the legacy option
 
+// Upper bound accepted for profileShift. Teeth would start overlapping the
+// next tooth's gap around x ~= pi/(4*tan(pa)) (~2.16 at 20deg) — 1.2 stays
+// well clear of that with a comfortable margin for any allowed pressure angle.
+export const MAX_PROFILE_SHIFT = 1.2;
+
 // --------------------------------------------------------------------------- //
 // Radii (all take an explicit module — nothing is locked to 1 any more)       //
 // --------------------------------------------------------------------------- //
 export function pitchRadius(teeth: number, module: number): number {
   return (module * teeth) / 2.0;
 }
-export function rootRadius(teeth: number, module: number): number {
-  return Math.max(pitchRadius(teeth, module) - DEDENDUM_FACTOR * module, 0.1);
+/** `profileShift` (x, a module multiplier) raises the root: standard formula
+ *  rf = r - m*(hf* - x). Positive x thickens the tooth base (fixes undercut). */
+export function rootRadius(teeth: number, module: number, profileShift = 0): number {
+  return Math.max(pitchRadius(teeth, module) - (DEDENDUM_FACTOR - profileShift) * module, 0.1);
 }
-export function outerRadius(teeth: number, module: number): number {
-  return pitchRadius(teeth, module) + ADDENDUM_FACTOR * module;
+/** ra = r + m*(ha* + x) — positive shift also pushes the tip further out. */
+export function outerRadius(teeth: number, module: number, profileShift = 0): number {
+  return pitchRadius(teeth, module) + (ADDENDUM_FACTOR + profileShift) * module;
+}
+
+/**
+ * Minimum profile shift (x) needed so a gear with this tooth count doesn't
+ * undercut at the given pressure angle: x_min = ha* - z*sin²(pa)/2 (standard
+ * full-depth involute formula). 0 (clamped) once z is large enough on its
+ * own — the classic "17-tooth rule" at 20° falls out of this exactly.
+ */
+export function minProfileShift(
+  teeth: number,
+  pressureAngleDeg: number = DEFAULT_PRESSURE_ANGLE,
+  addendumFactor = ADDENDUM_FACTOR,
+): number {
+  const s = Math.sin(THREE.MathUtils.degToRad(pressureAngleDeg));
+  return Math.max(0, addendumFactor - (teeth * s * s) / 2);
+}
+
+/**
+ * Whether a gear at this shift still undercuts (shift below the minimum).
+ * A small practical tolerance (0.01) absorbs the classic "17-tooth rule"
+ * folk boundary — the exact theoretical cutoff at 20° is 18 teeth (17 needs
+ * a residual shift of ~0.006, negligible below print resolution).
+ */
+export function hasUndercut(
+  teeth: number,
+  pressureAngleDeg: number = DEFAULT_PRESSURE_ANGLE,
+  profileShift = 0,
+): boolean {
+  return profileShift + 0.01 < minProfileShift(teeth, pressureAngleDeg);
 }
 
 // --------------------------------------------------------------------------- //
@@ -43,6 +80,10 @@ export function outerRadius(teeth: number, module: number): number {
  * that amount (each flank pulled in by backlash/2), widening the gap so a
  * printed pair meshes with clearance at the standard centre distance instead
  * of binding. 0 = mathematically exact teeth.
+ *
+ * `profileShift` (x, standard addendum-modification coefficient) thickens
+ * the tooth base and pushes the tip out — the fix for undercut on low tooth
+ * counts. See `minProfileShift()` for the value that just eliminates it.
  */
 export function involuteGearOutline(
   teeth: number,
@@ -50,23 +91,42 @@ export function involuteGearOutline(
   pressureAngleDeg: number = DEFAULT_PRESSURE_ANGLE,
   steps = 8,
   backlash = 0,
+  profileShift = 0,
 ): THREE.Vector2[] {
   const pa = THREE.MathUtils.degToRad(pressureAngleDeg);
   const rPitch = pitchRadius(teeth, module);
   const rBase = rPitch * Math.cos(pa);
-  const rOut = outerRadius(teeth, module);
-  const rRoot = rootRadius(teeth, module);
+  const rRoot = rootRadius(teeth, module, profileShift);
 
   const invPa = Math.tan(pa) - pa;
-  // pull each flank in by the angular equivalent of backlash/2 at the pitch circle
+  // pull each flank in by the angular equivalent of backlash/2 at the pitch circle,
+  // and out again by the profile-shift's extra rack travel (2*x*tan(pa)/teeth)
   const dTheta = backlash / 2 / rPitch;
-  const halfTooth = Math.PI / (2 * teeth) - dTheta;
+  const halfTooth = Math.PI / (2 * teeth) - dTheta + (2 * profileShift * Math.tan(pa)) / teeth;
 
   const flank = (r: number): number => {
     const rr = Math.max(r, rBase);
     const alpha = Math.acos(rBase / rr);
     return halfTooth + invPa - (Math.tan(alpha) - alpha);
   };
+
+  // A large profile shift on a low tooth count can taper the tooth to a point
+  // before reaching the nominal addendum radius, and past that the flank
+  // angle goes negative — the outline crosses itself (self-intersecting
+  // polygon) and the extrude produces a broken, non-watertight mesh. Real
+  // gear design caps the addendum the same way ("pointed tooth" limit): clamp
+  // the tip radius so the topland keeps a minimum sliver of width instead of
+  // closing to (or past) a point.
+  const minTopHalfAngle = 0.01; // rad (~0.6deg) — a thin but real, non-crossing tip
+  let rOut = outerRadius(teeth, module, profileShift);
+  if (flank(rOut) < minTopHalfAngle) {
+    let lo = rBase, hi = rOut;
+    for (let i = 0; i < 40; i++) {
+      const mid = (lo + hi) / 2;
+      if (flank(mid) >= minTopHalfAngle) lo = mid; else hi = mid;
+    }
+    rOut = lo;
+  }
 
   const rStart = Math.min(rRoot, rBase);
   const radii: number[] = [];

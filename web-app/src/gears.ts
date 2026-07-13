@@ -11,11 +11,12 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import {
   MIN_TEETH,
   DEFAULT_PRESSURE_ANGLE,
-  DEDENDUM_FACTOR,
+  MAX_PROFILE_SHIFT,
   involuteGearOutline,
   circleProfile,
   dFlatProfile,
   asHole,
+  pitchRadius,
   rootRadius,
   weld,
   isWatertight,
@@ -34,6 +35,7 @@ export interface GearParams {
   hubHeight?: number; // mm the hub protrudes above the top face (default: thickness)
   thickness: number; // mm
   backlash?: number; // mm tooth-thickness reduction per gear (default 0)
+  profileShift?: number; // addendum-modification coefficient x (default 0); see minProfileShift()
 }
 
 /** Typed validation error. */
@@ -70,10 +72,17 @@ export function validate(p: GearParams): void {
     );
   }
 
+  const profileShift = p.profileShift ?? 0;
+  if (profileShift < 0 || profileShift > MAX_PROFILE_SHIFT) {
+    throw new GearValidationError(
+      `Profile shift must be between 0 and ${MAX_PROFILE_SHIFT} for this tool.`,
+    );
+  }
+
   const bore = p.boreDiameter ?? 0;
   if (bore < 0) throw new GearValidationError("Bore diameter cannot be negative.");
-  // Bore must not cut into the tooth root: boreDiameter < pitchDiameter - 2*dedendum.
-  const maxBore = 2 * rootRadius(p.teeth, p.module);
+  // Bore must not cut into the (possibly shifted) tooth root.
+  const maxBore = 2 * rootRadius(p.teeth, p.module, profileShift);
   if (bore >= maxBore) {
     throw new GearValidationError(
       `Bore diameter (${bore.toFixed(2)} mm) reaches the tooth root ` +
@@ -96,7 +105,7 @@ export function validate(p: GearParams): void {
     if (hub <= bore) {
       throw new GearValidationError("Hub diameter must be 0 (none) or larger than the bore.");
     }
-    if (hub >= 2 * (rootRadius(p.teeth, p.module) + DEDENDUM_FACTOR * p.module)) {
+    if (hub >= 2 * pitchRadius(p.teeth, p.module)) {
       throw new GearValidationError("Hub diameter must be smaller than the pitch diameter.");
     }
     const hubHeight = p.hubHeight ?? p.thickness;
@@ -140,7 +149,7 @@ export function generateInvoluteGear(params: GearParams): THREE.BufferGeometry {
 
   const hole = boreOutline(params);
   const gear = extrudeWithHole(
-    involuteGearOutline(params.teeth, params.module, pa, 8, params.backlash ?? 0),
+    involuteGearOutline(params.teeth, params.module, pa, 8, params.backlash ?? 0, params.profileShift ?? 0),
     hole,
     params.thickness,
   );
@@ -180,5 +189,6 @@ export function gearParamsFromPreset(rec: Record<string, unknown>): GearParams {
     hubHeight: rec.hubHeight as number | undefined,
     thickness: rec.thickness as number,
     backlash: (rec.backlash as number) ?? 0,
+    profileShift: (rec.profileShift as number) ?? 0,
   };
 }

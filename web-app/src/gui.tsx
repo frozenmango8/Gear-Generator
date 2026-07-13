@@ -7,7 +7,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
-import { rootRadius, outerRadius, DEFAULT_PRESSURE_ANGLE, MIN_TEETH } from "./common.js";
+import { rootRadius, outerRadius, minProfileShift, hasUndercut, DEFAULT_PRESSURE_ANGLE, MIN_TEETH, MAX_PROFILE_SHIFT } from "./common.js";
 import { generateInvoluteGear, gearParamsFromPreset, GearParams, GearValidationError, BoreShape } from "./gears.js";
 import { generateShaft, ShaftError } from "./shaft.js";
 import { downloadStl } from "./stl.js";
@@ -34,6 +34,7 @@ export default function App() {
   const [hubHeight, setHubHeight] = useState(6);
   const [thickness, setThickness] = useState(6);
   const [backlash, setBacklash] = useState(0.1);
+  const [profileShift, setProfileShift] = useState(0);
   const [shaftLength, setShaftLength] = useState(30);
   const [shaftClearance, setShaftClearance] = useState(0.2);
   const [showShaftInPreview, setShowShaftInPreview] = useState(true);
@@ -44,10 +45,12 @@ export default function App() {
   const [shaftPreview, setShaftPreview] = useState<THREE.BufferGeometry | null>(null);
 
   // dynamic limits so sliders can't cross into invalid geometry
-  const maxBore = Math.max(0, +(2 * rootRadius(teeth, module) - 0.2).toFixed(1));
-  const maxHub = +(2 * outerRadius(teeth, module) - 0.4).toFixed(1);
+  const maxBore = Math.max(0, +(2 * rootRadius(teeth, module, profileShift) - 0.2).toFixed(1));
+  const maxHub = +(2 * outerRadius(teeth, module, profileShift) - 0.4).toFixed(1);
   const maxFlat = Math.max(0.2, +(bore * 0.9).toFixed(1));
   const maxBacklash = +Math.min(0.6, module * 0.4).toFixed(2);
+  const recommendedShift = +minProfileShift(teeth, pressureAngle).toFixed(2);
+  const undercut = hasUndercut(teeth, pressureAngle, profileShift);
 
   useEffect(() => {
     if (bore > maxBore) setBore(maxBore);
@@ -66,6 +69,7 @@ export default function App() {
   const params: GearParams = {
     module, teeth, pressureAngle, boreDiameter: bore, boreShape, flatDepth,
     hubDiameter: mode === "single" ? hub : 0, hubHeight, thickness, backlash,
+    profileShift: mode === "single" ? profileShift : 0,
   };
 
   // gear A
@@ -77,7 +81,7 @@ export default function App() {
       setGeometry(null);
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [module, teeth, pressureAngle, bore, boreShape, flatDepth, hub, hubHeight, thickness, backlash, mode]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [module, teeth, pressureAngle, bore, boreShape, flatDepth, hub, hubHeight, thickness, backlash, profileShift, mode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // gear B (pair mode) — shares module / pressure angle / thickness / bore shape / backlash
   useEffect(() => {
@@ -141,6 +145,7 @@ export default function App() {
     setHubHeight(p.hubHeight ?? p.thickness);
     setThickness(p.thickness);
     setBacklash(p.backlash ?? 0);
+    setProfileShift(p.profileShift ?? 0);
     setMode("single");
     setStatus(`Loaded preset: ${rec.name as string}`);
     setError("");
@@ -176,8 +181,9 @@ export default function App() {
             ) : (
               <>
                 <span>pitch &oslash; <b>{(module * teeth).toFixed(1)}</b> mm</span>
-                <span>outer &oslash; <b>{(2 * outerRadius(teeth, module)).toFixed(1)}</b> mm</span>
+                <span>outer &oslash; <b>{(2 * outerRadius(teeth, module, profileShift)).toFixed(1)}</b> mm</span>
                 {shaftPreview && <span>shaft <b>⌀{(bore - 2 * shaftClearance).toFixed(1)}</b> seated in bore</span>}
+                {undercut && <span className="warn">undercut — thin at the base</span>}
               </>
             )}
           </div>
@@ -229,6 +235,27 @@ export default function App() {
               <input type="range" min={MIN_TEETH} max={60} step={1} value={teethB}
                 onChange={(e) => setTeethB(Number(e.target.value))} />
               <small>different count, same module → still meshes</small>
+            </div>
+          )}
+
+          {mode === "single" && (
+            <div className="field">
+              <div className="field-head">
+                <span>Profile shift</span>
+                <span className="val">{profileShift === 0 ? "none" : profileShift.toFixed(2)}</span>
+              </div>
+              <input type="range" min={0} max={MAX_PROFILE_SHIFT} step={0.02} value={profileShift}
+                onChange={(e) => setProfileShift(Number(e.target.value))} />
+              {undercut ? (
+                <small className="warn">
+                  {teeth}t undercuts below shift {recommendedShift.toFixed(2)} — thin, weak tooth base.{" "}
+                  <button type="button" className="linklike" onClick={() => setProfileShift(recommendedShift)}>
+                    Auto-fix undercut
+                  </button>
+                </small>
+              ) : (
+                <small>thickens the tooth base for low tooth counts; {teeth}t needs none at this pressure angle</small>
+              )}
             </div>
           )}
 

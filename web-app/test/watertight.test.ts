@@ -7,7 +7,7 @@
 import * as THREE from "three";
 import { generateInvoluteGear, GearValidationError, BoreShape } from "../src/gears.js";
 import { generateShaft, ShaftError } from "../src/shaft.js";
-import { isWatertight, outerRadius, rootRadius, pitchRadius, involuteGearOutline } from "../src/common.js";
+import { isWatertight, outerRadius, rootRadius, pitchRadius, involuteGearOutline, minProfileShift, hasUndercut } from "../src/common.js";
 
 let failures = 0;
 const ok = (cond: boolean, msg: string) => {
@@ -120,6 +120,63 @@ for (const [module, teeth] of [[2, 20], [1, 16], [3, 24]] as const) {
     `m=${module} ${teeth}t backlash=${bl}: reduction=${reduction.toFixed(4)} rad (want ${expected.toFixed(4)}) watertight=${isWatertight(g)}`);
 }
 
+console.log("\n=== minProfileShift(): matches the standard full-depth formula ===");
+{
+  // x_min = ha* - z*sin^2(pa)/2; the "17-tooth rule" is this formula at pa=20.
+  const known: [number, number, number][] = [
+    [17, 20, 0],
+    [6, 20, 0.649],
+    [8, 20, 0.532],
+    [12, 20, 0.298],
+  ];
+  for (const [teeth, pa, expected] of known) {
+    const got = minProfileShift(teeth, pa);
+    ok(Math.abs(got - expected) < 0.01, `minProfileShift(${teeth}t, ${pa}deg) = ${got.toFixed(3)} (want ~${expected})`);
+  }
+  ok(!hasUndercut(17, 20, 0), "17t @ 20deg, shift 0 -> no undercut");
+  ok(hasUndercut(6, 20, 0), "6t @ 20deg, shift 0 -> undercuts");
+  ok(!hasUndercut(6, 20, minProfileShift(6, 20)), "6t @ 20deg, recommended shift -> no undercut");
+}
+
+console.log("\n=== Profile shift: widens the tooth by the exact predicted amount ===");
+// Measured at the ROOT end (indices 0 and 2*(steps+1)-1), not the tip: the tip
+// radius (rOut) itself grows with shift (taller addendum), so flank(rOut)
+// conflates the shift with the involute's natural narrowing at a larger
+// radius. Below the base circle the flank angle is constant in r (straight
+// radial line), so measuring there isolates the pure halfTooth shift.
+for (const [module, teeth, pa] of [[2, 20, 20], [1, 17, 20], [1.5, 24, 14.5]] as const) {
+  const x = 0.2;
+  const steps = 8;
+  const rootIdx = 2 * (steps + 1) - 1;
+  const angAt = (o: THREE.Vector2[], idx: number) => Math.atan2(o[idx].y, o[idx].x);
+  const o0 = involuteGearOutline(teeth, module, pa, steps, 0, 0);
+  const oX = involuteGearOutline(teeth, module, pa, steps, 0, x);
+  const w0 = Math.abs(angAt(o0, rootIdx) - angAt(o0, 0));
+  const wX = Math.abs(angAt(oX, rootIdx) - angAt(oX, 0));
+  const increase = wX - w0;
+  const expectedIncrease = (4 * x * Math.tan(THREE.MathUtils.degToRad(pa))) / teeth;
+  const amountOk = Math.abs(increase - expectedIncrease) < 1e-4;
+  const g = generateInvoluteGear({ module, teeth, pressureAngle: pa, boreDiameter: 2, thickness: 4, profileShift: x });
+  ok(amountOk && isWatertight(g),
+    `m=${module} ${teeth}t PA=${pa} shift=${x}: widen=${increase.toFixed(4)}(want ${expectedIncrease.toFixed(4)}) watertight=${isWatertight(g)}`);
+}
+
+console.log("\n=== Profile shift fixes undercut on genuinely small gears (recommended shift, incl. pointed-tip clamp) ===");
+for (const [module, teeth, pa] of [[2, 6, 20], [1, 8, 20], [1.5, 12, 14.5]] as const) {
+  const x = minProfileShift(teeth, pa); // the recommended undercut-fix shift
+  const bore = Math.min(2, rootRadius(teeth, module, x) * 0.5);
+  const g = generateInvoluteGear({ module, teeth, pressureAngle: pa, boreDiameter: bore, thickness: 4, profileShift: x });
+  const od = tipDiameter(g);
+  const nominalOD = 2 * outerRadius(teeth, module, x); // the pointed-tooth clamp only ever shrinks this
+  const odWithinNominal = od <= nominalOD + 0.05;
+  const stillUndercut = hasUndercut(teeth, pa, x);
+  ok(
+    isWatertight(g) && odWithinNominal && !stillUndercut,
+    `m=${module} ${teeth}t PA=${pa} recommendedShift=${x.toFixed(3)}: watertight=${isWatertight(g)} ` +
+      `OD=${od.toFixed(2)}(<= nominal ${nominalOD.toFixed(2)}) stillUndercut=${stillUndercut}`,
+  );
+}
+
 console.log("\n=== Matching shaft: watertight + fits the bore + correct length ===");
 for (const [boreDiameter, shape, flat] of [[6, "round", 0], [6, "d_flat", 1.5], [10, "d_flat", 3]] as const) {
   const clr = 0.2;
@@ -168,6 +225,14 @@ mustThrow(
 mustThrow(
   () => generateInvoluteGear({ module: 1, teeth: 20, thickness: 4, backlash: 2 }),
   "backlash too large",
+);
+mustThrow(
+  () => generateInvoluteGear({ module: 1, teeth: 20, thickness: 4, profileShift: -0.1 }),
+  "profileShift negative",
+);
+mustThrow(
+  () => generateInvoluteGear({ module: 1, teeth: 20, thickness: 4, profileShift: 5 }),
+  "profileShift too large",
 );
 
 const mustThrowShaft = (fn: () => void, label: string) => {

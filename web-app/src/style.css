@@ -9,6 +9,7 @@
   --steel: #2b7a9e;
   --ok: #1a7a4a;
   --err: #b22;
+  --warn: #9a5b00;
   --ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
@@ -16,7 +17,7 @@
   :root {
     --bg: #0e1319; --panel: #171e27; --ink: #e7edf4; --muted: #8a9bab;
     --line: #263140; --accent: #f08a44; --accent-ink: #ffd9bd; --steel: #4fa6cc;
-    --ok: #56c98d; --err: #ff8080;
+    --ok: #56c98d; --err: #ff8080; --warn: #ffb454;
   }
 }
 * { box-sizing: border-box; }
@@ -115,6 +116,12 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .msg { margin: 0; font-size: 13.5px; }
 .msg.error { color: var(--err); }
 .msg.ok { color: var(--ok); }
+.warn { color: var(--warn); font-weight: 600; }
+.readout .warn { font-family: var(--ui); }
+.linklike {
+  background: none; border: 0; padding: 0; margin: 0; font: inherit; font-weight: 600;
+  color: var(--warn); text-decoration: underline; cursor: pointer; display: inline;
+}
 
 @media (max-width: 760px) {
   .controls { padding: 16px; gap: 14px; }

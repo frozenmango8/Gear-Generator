@@ -31,6 +31,7 @@ npm test               # watertightness + dimensional matrix
 | `hubHeight`     | mm the hub protrudes above the top face (default: `thickness`) |
 | `thickness`     | mm                                                |
 | `backlash`      | mm tooth-thinning so a printed pair turns free (0 = exact) |
+| `profileShift`  | addendum-modification coefficient x, 0–1.2 (0 = exact); see `minProfileShift()` |
 
 **Validation:** `teeth ≥ 6`, `module > 0`, `thickness > 0`, and
 `boreDiameter < pitchDiameter − 2·dedendum` (the bore can't cut into the tooth
@@ -61,10 +62,17 @@ version needed one.
 change (previously the whole WebGL scene was torn down and rebuilt on every
 slider tick, which stuttered on lower-powered devices, phones especially).
 
-Drag to orbit, scroll/pinch to zoom (`OrbitControls`, damped, panning
-disabled). The gear auto-spins in-plane until you interact with it (single
-preview) or spins continuously as the meshing demo (pair preview) — either
-way, orbiting works at any time.
+Drag to orbit, scroll/pinch to zoom, two-finger trackpad scroll left/right to
+pan (`OrbitControls` + a small custom handler in `orbitPan.ts` — OrbitControls'
+built-in wheel handler only reads vertical scroll for zoom and silently
+ignores a horizontal-only gesture, so a capture-phase `wheel` listener
+detects a horizontal-dominant scroll, pans the camera + target along the
+camera's local right axis, and stops the event before OrbitControls also
+tries to zoom; vertical/diagonal scroll is left completely untouched).
+`enablePan` is also on, so real touchscreens get two-finger-drag panning for
+free (OrbitControls' default touch mapping). The gear auto-spins in-plane
+until you interact with it (single preview) or spins continuously as the
+meshing demo (pair preview) — either way, orbit/pan/zoom work at any time.
 
 When a bore is set, `GearPreview` can also render the matching shaft **seated
 in the bore** (toggle: "Show shaft seated in the bore"), so the fit is
@@ -75,6 +83,35 @@ and the shaft profile are built around the same (0,0) origin in `common.ts` /
 `shaft.ts`, and only the Z axis is re-centred for display — so the shaft lands
 exactly seated, including the flat orientation on a D-flat bore, with no
 separate alignment step needed.
+
+## Profile shift (fixing undercut on small gears)
+
+Below ~17 teeth at 20° (the classic "17-tooth rule" — the exact theoretical
+cutoff is 18; 17 needs a negligible ~0.006 residual shift), a standard
+involute gear **undercuts**: the cutter carves into the tooth root, leaving a
+thin, weak base. `profileShift` (x, the standard addendum-modification
+coefficient) counters this — it thickens the tooth base and pushes the tip
+out. `minProfileShift(teeth, pressureAngle)` returns the shift that just
+eliminates it, and the GUI's **Profile shift** slider shows an "Auto-fix
+undercut" button that jumps straight to it whenever `hasUndercut()` is true.
+
+**Single-gear mode only.** A meshing *pair* would need the two shifts to
+balance (`x1 + x2`) against a resulting change in operating pressure angle and
+centre distance — a materially different, harder problem than shifting one
+printed gear. Rather than half-implement that incorrectly, `profileShift` is
+scoped to the single-gear generator; gear B in pair mode stays unshifted.
+
+**The tradeoff this surfaces, not hides:** a large shift on a very low tooth
+count pushes the addendum out far enough that the tooth tapers to a point
+before reaching the nominal outer radius — and past that point the outline
+would self-intersect (verified: 7 crossing segments on an unclamped 6-tooth,
+module-2, 20° case at the exact recommended shift). `involuteGearOutline`
+detects this (`flank(rOut)` going below a minimum topland angle) and clamps
+the tip radius via bisection to the largest radius that keeps a real,
+non-crossing tip — the same "pointed tooth" limit real gear design applies.
+The reported `outerRadius()` stays the nominal formula value; the actual tip
+can be smaller once this clamp engages, which is why validated undercut-fix
+cases check the tip is `<=` nominal rather than asserting an exact match.
 
 ## Presets
 
@@ -96,9 +133,20 @@ Swept across the general parameter space, not fixed sizes:
   separately — **hub height** verified to land exactly at `thickness +
   hubHeight` regardless of thickness, so the two are genuinely independent.
 - **Validation** errors thrown for teeth < 6, module 0, thickness 0, bore into
-  root, hub ≤ bore, and hub height ≤ 0.
+  root, hub ≤ bore, hub height ≤ 0, and profile shift outside 0–1.2.
+- **`minProfileShift()`** checked against hand-computed values (17t≈0, 6t≈0.649,
+  8t≈0.532, 12t≈0.298 at 20°) and `hasUndercut()`'s true/false flip around them.
+- **Profile shift widening** verified as an exact match to the predicted
+  formula (measured at the root, where the flank angle is shift-invariant of
+  the tip radius — see the code comment for why the tip isn't used for this).
+  Separately, the **actual undercut-fix path** (recommended shift on 6/8/12
+  tooth gears, including the pointed-tip clamp) is verified watertight, no
+  longer undercutting, with the tip at-or-under the nominal outer radius.
 
 Also smoke-tested in headless Chromium: the form renders, presets load and
 populate every field (confirmed against the computed pitch diameter), the hub
-height slider appears/disappears with the hub, and no console errors are
-thrown while driving the controls.
+height slider appears/disappears with the hub, dragging teeth to 6 shows the
+undercut warning and "Auto-fix undercut" clears it (profile shift jumps to the
+recommended ~0.65, confirmed watertight, no console errors), and horizontal
+vs. vertical scroll measurably pan vs. zoom respectively (verified by tracking
+the gear's on-screen silhouette, not just a raw pixel diff).

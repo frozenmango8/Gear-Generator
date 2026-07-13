@@ -12,6 +12,7 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { attachHorizontalWheelPan } from "./orbitPan.js";
 
 interface Ctx {
   renderer: THREE.WebGLRenderer;
@@ -72,7 +73,7 @@ export default function GearPreview({ geometry, shaft = null }: Props) {
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.1;
-    controls.enablePan = false;
+    controls.enablePan = true; // right-drag pans; also enables real two-finger touch-drag pan
     controls.rotateSpeed = 0.9;
 
     const gearGroup = new THREE.Group();
@@ -86,6 +87,7 @@ export default function GearPreview({ geometry, shaft = null }: Props) {
     };
     ctx.current = c;
     controls.addEventListener("start", () => { c.spin = false; });
+    const detachWheelPan = attachHorizontalWheelPan(renderer.domElement, camera, controls, () => { c.spin = false; });
 
     const resize = () => {
       const w = el.clientWidth || 1;
@@ -109,6 +111,7 @@ export default function GearPreview({ geometry, shaft = null }: Props) {
     return () => {
       cancelAnimationFrame(c.raf);
       ro.disconnect();
+      detachWheelPan();
       controls.dispose();
       c.mesh?.geometry.dispose();
       c.shaftMesh?.geometry.dispose();

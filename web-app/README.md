@@ -58,10 +58,14 @@ version needed one.
 
 ## 3D preview
 
-`GearPreview` and `MeshPreview` build the renderer/scene/camera/controls
-**once** and reuse them; only the mesh geometry is swapped when parameters
-change (previously the whole WebGL scene was torn down and rebuilt on every
-slider tick, which stuttered on lower-powered devices, phones especially).
+All three previews build the renderer/scene/camera/controls **once** and reuse
+them; only the mesh geometry is swapped when parameters change (previously the
+whole WebGL scene was torn down and rebuilt on every slider tick, which
+stuttered on lower-powered devices, phones especially). That rig — lights,
+damped `OrbitControls`, the horizontal-wheel pan handler, a `ResizeObserver`
+and the animation loop — lives in `previewScene.ts`; what stays in each
+preview is only its materials, its mesh layout and animation, and how it
+frames the camera.
 
 Drag to orbit, scroll/pinch to zoom, two-finger trackpad scroll left/right to
 pan (`OrbitControls` + a small custom handler in `orbitPan.ts` — OrbitControls'
@@ -138,6 +142,13 @@ the gear's real physical size and its real, integer tooth count. The tapered
 end and a uniformly-scaled copy at the inner end, `faceWidth` further in along
 the axis — the standard simplification for **straight** (non-spiral) bevel
 teeth, whose flanks are straight lines from the cone apex.
+
+The GUI's bore ceiling for this mode keeps the same 0.2 mm margin the spur
+`maxBore` does. Bore validation rejects landing exactly *on* the limit (it's
+`>=`), so clamping a too-large bore to the bare minimum of the pair's two
+limits made whichever gear owned the tighter limit throw — its download button
+went dead while the other stayed live, and because gear B's error was
+swallowed rather than reported, nothing said why.
 
 **Scope, stated plainly:** 90° shaft angle only (no arbitrary bevel angle),
 straight teeth (no spiral/hypoid), no hub, and no profile shift (a meshing

@@ -16,7 +16,7 @@ const scripts = [...html.matchAll(/<script\b[^>]*>[\s\S]*?<\/script>/g)].map((m)
   m[0].replace(/\s+crossorigin/, ""),
 );
 const out =
-  ["<title>LEGO Gear Generator</title>", ...styles, '<div id="root"></div>', ...scripts].join("\n") +
+  ["<title>Involute Gear Generator</title>", ...styles, '<div id="root"></div>', ...scripts].join("\n") +
   "\n";
 writeFileSync("dist-artifact/content.html", out);
 console.log(`Wrote dist-artifact/content.html (${out.length} bytes, ${scripts.length} script, ${styles.length} style)`);

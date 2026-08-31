@@ -1,7 +1,7 @@
 {
-  "name": "lego-gear-web",
+  "name": "gear-generator-web",
   "version": "1.0.0",
-  "description": "Browser-based LEGO Technic gear generator (TypeScript port of the Python tool)",
+  "description": "Browser-based parametric involute spur and bevel gear generator",
   "type": "module",
   "scripts": {
     "dev": "vite",

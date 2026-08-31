@@ -245,9 +245,14 @@ export function asHole(points: THREE.Vector2[]): THREE.Path {
  * Weld coincident vertices by POSITION (three's mergeVertices otherwise keeps
  * cap/wall vertices apart because their normals differ, leaving an open seam).
  * Strip normals, weld, recompute — matching a trimesh-style watertight weld.
+ *
+ * mergeVertices() reads an index when there is one and falls back to the raw
+ * position count when there isn't, so non-indexed input (everything out of
+ * ExtrudeGeometry) needs no conversion first — calling toNonIndexed() on it
+ * only logged "BufferGeometry is already non-indexed" and returned it as-is.
  */
 export function weld(geometry: THREE.BufferGeometry, tolerance = 1e-4): THREE.BufferGeometry {
-  const g = (geometry.index ? geometry : geometry.toNonIndexed()).clone();
+  const g = geometry.clone();
   g.deleteAttribute("normal");
   g.deleteAttribute("uv");
   const merged = mergeVertices(g, tolerance);
